@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Petit Bac !</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getDatabase, ref, set, get, update, onValue }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+// ════════════════════════════════════════════════
+// ▼▼▼  COLLEZ ICI VOTRE CONFIG FIREBASE  ▼▼▼
+// ════════════════════════════════════════════════
+const firebaseConfig = {
+  apiKey: "AIzaSyAos7-Ou3jLHXluPy1TJkU6sssdpTkdzUk",
+  authDomain: "petit-bac-f6ef7.firebaseapp.com",
+  databaseURL: "https://petit-bac-f6ef7-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "petit-bac-f6ef7",
+  storageBucket: "petit-bac-f6ef7.firebasestorage.app",
+  messagingSenderId: "549686028530",
+  appId: "1:549686028530:web:9d9e884419f4b44f82886b"
+};
+// ════════════════════════════════════════════════
+
+let app, db;
+try {
+  app = initializeApp(firebaseConfig);
+  db  = getDatabase(app);
+} catch(e) {
+  console.warn('Firebase init failed – check your config', e);
+}
+
+// ── DB helpers ──────────────────────────────────
+const gRef   = (id)          => ref(db, `games/${id}`);
+const fRef   = (id, ...path) => ref(db, ['games', id, ...path].join('/'));
+const dbSet  = (id, d)       => set(gRef(id), d);
+const dbUpd  = (id, d)       => update(gRef(id), d);
+const dbGet  = async (id)    => (await get(gRef(id))).val();
+const dbWatch= (id, cb)      => onValue(gRef(id), s => cb(s.val()));
+
+// ── Constants ──────────────────────────────────
+const ABC     = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+const COLORS  = ['#e63946','#457b9d','#2a9d8f','#f4a261','#6d6875','#e9c46a','#264653','#e76f51'];
+const DEF_TH  = ['Prénom','Ville','Animal','Objet','Métier'];
+const sk      = s => s.replace(/\s/g,'__');   // safe Firebase key
+const unsk    = s => s.replace(/__/g,' ');
+
+// ── App State ──────────────────────────────────
+let G = {
+  gameId:null, myId:null, isHost:false, config:null,
+  unsub:null, timerIv:null, timerLeft:0
+};
+let exLetters  = new Set(['W','X','Y']);
+let themes     = [];
+let gameMode   = 'timer';
+
+// ══════════════════════════════════════════════
+// SETUP
+// ══════════════════════════════════════════════
+function initSetup() {
+  const grid = document.getElementById('letters-grid');
+  ABC.forEach(l => {
+    const b = document.createElement('div');
+    b.className = 'letter-btn' + (exLetters.has(l)?' excluded':'');
+    b.textContent = l;
+    b.onclick = () => { exLetters.has(l)?(exLetters.delete(l),b.classList.remove('excluded')):(exLetters.add(l),b.classList.add('excluded')); };
+    grid.appendChild(b);
+  });
+  DEF_TH.forEach(addThemeChip);
+  themes = [...DEF_TH];
+  document.getElementById('theme-input').addEventListener('keydown', e=>e.key==='Enter'&&addTheme());
+}
+function addTheme() {
+  const inp=document.getElementById('theme-input'), v=inp.value.trim();
+  if(!v) return;
+  if(themes.includes(v)){showToast('Thème déjà ajouté !');return;}
+  themes.push(v); addThemeChip(v); inp.value='';
+}
+function addThemeChip(v) {
+  const list=document.getElementById('themes-list');
+  const c=document.createElement('div'); c.className='chip'; c.dataset.theme=v;
+  c.innerHTML=`${v}<span class="remove" data-v="${v}">×</span>`;
+  c.querySelector('.remove').onclick=()=>{themes=themes.filter(t=>t!==v);c.remove();};
+  list.appendChild(c);
+}
+window.selectMode = el => {
+  document.querySelectorAll('#mode-group .radio-option').forEach(e=>e.classList.remove('selected'));
+  el.classList.add('selected'); gameMode=el.dataset.mode;
+  document.getElementById('timer-options').style.display=gameMode==='timer'?'block':'none';
+};
+
+// ══════════════════════════════════════════════
+// CREATE GAME (host)
+// ══════════════════════════════════════════════
+window.createGame = async () => {
+  if(!db){showToast('⚠️ Firebase non configuré – voir le guide !');return;}
+  const nbP  = +document.getElementById('nb-players').value||4;
+  const nbR  = +document.getElementById('nb-rounds').value||5;
+  const dur  = +document.getElementById('timer-duration').value||90;
+  const active = ABC.filter(l=>!exLetters.has(l));
+  if(active.length<nbR){showToast('Pas assez de lettres disponibles !');return;}
+  const th   = themes.length?themes:[...DEF_TH];
+  const id   = Math.random().toString(36).slice(2,8).toUpperCase();
+  G.gameId=id; G.myId='host'; G.isHost=true;
+  G.config   = {nbPlayers:nbP,nbRounds:nbR,timerDuration:dur,mode:gameMode,themes:th,activeLetters:active};
+  try {
+    await dbSet(id,{config:G.config,phase:'lobby',currentRound:0,currentLetter:'',players:{},roundsData:{},totalPoints:{},stoppedBy:null,createdAt:Date.now()});
+    showScreen('lobby-screen');
+    document.getElementById('invite-url').textContent=`${location.origin}${location.pathname}?game=${id}`;
+    document.getElementById('player-count').textContent=`0 / ${nbP}`;
+    startListener();
+  } catch(e){showToast('Erreur Firebase – vérifiez votre config');console.error(e);}
+};
+
+// ══════════════════════════════════════════════
+// LOBBY
+// ══════════════════════════════════════════════
+window.setHostPseudo = async () => {
+  const p=document.getElementById('host-pseudo').value.trim();
+  if(!p){showToast('Entrez un pseudo !');return;}
+  await update(fRef(G.gameId,'players'),{host:{id:'host',pseudo:p,avatar:COLORS[0],isHost:true}});
+  await update(fRef(G.gameId,'totalPoints'),{host:0});
+  showToast(`Bienvenue ${p} ! 🎉`);
+};
+window.copyLink = () => navigator.clipboard.writeText(document.getElementById('invite-url').textContent).then(()=>showToast('Lien copié !')).catch(()=>showToast('Copiez le lien manuellement'));
+
+// ══════════════════════════════════════════════
+// JOIN (other players)
+// ══════════════════════════════════════════════
+async function checkJoin() {
+  const params=new URLSearchParams(location.search), gid=params.get('game');
+  if(!gid||!db) return false;
+  G.gameId=gid;
+  const stored=sessionStorage.getItem('pb_id_'+gid);
+  const data=await dbGet(gid);
+  if(!data){showToast('Partie introuvable !');return false;}
+  G.config=data.config;
+  if(stored&&data.players?.[stored]){
+    G.myId=stored; G.isHost=data.players[stored].isHost||false;
+    showScreen('wait-screen');
+    document.getElementById('wait-pseudo-display').textContent=data.players[stored].pseudo;
+    startListener();
+    return true;
+  }
+  showScreen('join-screen');
+  return true;
+}
+window.joinGame = async () => {
+  const p=document.getElementById('join-pseudo').value.trim();
+  if(!p){showToast('Entrez un pseudo !');return;}
+  const data=await dbGet(G.gameId);
+  const players=Object.values(data.players||{});
+  if(players.find(x=>x.pseudo===p)){showToast('Pseudo déjà pris !');return;}
+  const id='p_'+Math.random().toString(36).slice(2,6);
+  G.myId=id; G.isHost=false;
+  sessionStorage.setItem('pb_id_'+G.gameId,id);
+  G.config=data.config;
+  const avatar=COLORS[players.length%COLORS.length];
+  await update(fRef(G.gameId,'players'),{[id]:{id,pseudo:p,avatar,isHost:false}});
+  await update(fRef(G.gameId,'totalPoints'),{[id]:0});
+  document.getElementById('wait-pseudo-display').textContent=p;
+  showScreen('wait-screen');
+  startListener();
+};
+
+// ══════════════════════════════════════════════
+// REAL-TIME LISTENER (all screens)
+// ══════════════════════════════════════════════
+function startListener() {
+  if(G.unsub) G.unsub();
+  G.unsub=dbWatch(G.gameId, data=>{
+    if(!data) return;
+    G.config=data.config;
+    const cur=document.querySelector('.screen.active')?.id;
+    const phase=data.phase;
+
+    // Lobby updates
+    if(phase==='lobby') {
+      const pls=Object.values(data.players||{});
+      renderPlayerList(pls,G.config.nbPlayers);
+      if(cur==='wait-screen') { /* keep waiting */ }
+      return;
+    }
+    // Game start
+    if(phase==='game' && cur!=='game-screen') {
+      clearInterval(G.timerIv);
+      showScreen('game-screen');
+      renderGameScreen(data);
+      startTimer(data);
+      return;
+    }
+    // Stop detected by host from stoppedBy field
+    if(phase==='game' && G.isHost && data.stoppedBy) {
+      clearInterval(G.timerIv);
+      const who=data.players?.[data.stoppedBy]?.pseudo||'Un joueur';
+      saveMyAnswers(data.currentRound).then(()=>endRound(data.currentRound,`${who} a dit STOP !`));
+      return;
+    }
+    // Review
+    if(phase==='review' && cur!=='review-screen') {
+      clearInterval(G.timerIv);
+      showStopOverlay('Manche terminée !',()=>{showScreen('review-screen');renderReview(data);});
+      return;
+    }
+    if(phase==='review' && cur==='review-screen') { renderReview(data); return; }
+    // Results
+    if(phase==='results' && cur!=='results-screen') {
+      clearInterval(G.timerIv);
+      showResults(data);
+    }
+  });
+}
+function renderPlayerList(pls,max) {
+  const list=document.getElementById('player-list');
+  list.innerHTML='';
+  document.getElementById('player-count').textContent=`${pls.length} / ${max}`;
+  pls.forEach(p=>{
+    const it=document.createElement('div'); it.className='player-item';
+    it.innerHTML=`<div class="player-avatar" style="background:${p.avatar}">${p.pseudo[0].toUpperCase()}</div><div class="player-name">${p.pseudo}</div>${p.isHost?'<span class="player-badge">🎮 Hôte</span>':'<span class="player-badge">✓ Prêt</span>'}`;
+    list.appendChild(it);
+  });
+}
+
+// ══════════════════════════════════════════════
+// HOST: start game
+// ══════════════════════════════════════════════
+window.startGame = async () => {
+  const data=await dbGet(G.gameId);
+  const pls=Object.values(data.players||{});
+  if(pls.length<2){showToast('Au moins 2 joueurs requis !');return;}
+  if(!pls.find(p=>p.id==='host')){showToast('Définissez votre pseudo !');return;}
+  await launchRound(data,0);
+};
+async function launchRound(data,roundIdx) {
+  const used=(data.roundsData?Object.values(data.roundsData).map(r=>r.letter):[]);
+  const avail=G.config.activeLetters.filter(l=>!used.includes(l));
+  const letter=avail[Math.floor(Math.random()*avail.length)];
+  const pls=Object.values(data.players||{});
+  const answers={},points={};
+  pls.forEach(p=>{
+    answers[p.id]={};points[p.id]={};
+    G.config.themes.forEach(t=>{answers[p.id][sk(t)]='';points[p.id][sk(t)]=-1;});
+  });
+  await dbUpd(G.gameId,{
+    phase:'game', currentRound:roundIdx, currentLetter:letter, stoppedBy:null,
+    [`roundsData/${roundIdx}`]:{letter,answers,points,startedAt:Date.now()}
+  });
+}
+
+// ══════════════════════════════════════════════
+// GAME SCREEN
+// ══════════════════════════════════════════════
+function renderGameScreen(data) {
+  const r=data.roundsData?.[data.currentRound]||{};
+  document.getElementById('round-label').textContent=`Manche ${data.currentRound+1} / ${G.config.nbRounds}`;
+  document.getElementById('current-letter').innerHTML=`<span class="letter-bounce">${data.currentLetter}</span>`;
+  document.getElementById('game-status').textContent='Remplissez les cases !';
+  const form=document.getElementById('categories-form'); form.innerHTML='';
+  G.config.themes.forEach(t=>{
+    const row=document.createElement('div'); row.className='category-row';
+    row.innerHTML=`<div class="cat-label">${t}</div><input class="cat-input" type="text" id="cat-${sk(t)}" placeholder="${t} en ${data.currentLetter}...">`;
+    form.appendChild(row);
+  });
+  const timerEl=document.getElementById('timer-display'),stopBtn=document.getElementById('stop-btn'),prog=document.getElementById('progress-area');
+  if(G.config.mode==='timer'){timerEl.style.display='block';stopBtn.style.display='none';prog.style.display='block';}
+  else{timerEl.style.display='none';prog.style.display='none';stopBtn.style.display='block';stopBtn.disabled=false;stopBtn.textContent=G.config.mode==='stop-individual'?"J'ai fini !":'STOP !';}
+}
+function startTimer(data) {
+  clearInterval(G.timerIv);
+  if(G.config.mode!=='timer') return;
+  const total=G.config.timerDuration;
+  const elapsed=Math.floor((Date.now()-(data.roundsData?.[data.currentRound]?.startedAt||Date.now()))/1000);
+  G.timerLeft=Math.max(0,total-elapsed);
+  updateTimerEl(total);
+  G.timerIv=setInterval(async()=>{
+    G.timerLeft--;
+    updateTimerEl(total);
+    document.getElementById('progress-fill').style.width=((G.timerLeft/total)*100)+'%';
+    if(G.timerLeft<=0){
+      clearInterval(G.timerIv);
+      await saveMyAnswers(data.currentRound);
+      if(G.isHost) await endRound(data.currentRound,'Temps écoulé !');
+    }
+  },1000);
+}
+function updateTimerEl(total){
+  const m=Math.floor(G.timerLeft/60),s=G.timerLeft%60;
+  const el=document.getElementById('timer-display');
+  el.textContent=`${m}:${s.toString().padStart(2,'0')}`;
+  el.className='timer-display'+(G.timerLeft<=10?' danger':'');
+}
+async function saveMyAnswers(roundIdx){
+  const upd={};
+  G.config.themes.forEach(t=>{
+    const el=document.getElementById('cat-'+sk(t));
+    upd[`roundsData/${roundIdx}/answers/${G.myId}/${sk(t)}`]=el?el.value.trim():'';
+  });
+  await dbUpd(G.gameId,upd);
+}
+window.playerStop = async () => {
+  const data=await dbGet(G.gameId);
+  await saveMyAnswers(data.currentRound);
+  const mode=G.config.mode;
+  if(mode==='stop-common'||mode==='first-stop'){
+    clearInterval(G.timerIv);
+    if(G.isHost) await endRound(data.currentRound,'STOP !');
+    else {
+      await dbUpd(G.gameId,{stoppedBy:G.myId});
+      document.getElementById('stop-btn').disabled=true;
+      document.getElementById('stop-btn').textContent='✓ En attente...';
+    }
+  } else {
+    document.getElementById('stop-btn').disabled=true;
+    document.getElementById('stop-btn').textContent='✓ En attente...';
+    document.getElementById('game-status').textContent='En attente des autres joueurs...';
+  }
+};
+async function endRound(roundIdx,msg){
+  await dbUpd(G.gameId,{phase:'review',currentRound:roundIdx,stoppedBy:null});
+}
+
+// ══════════════════════════════════════════════
+// REVIEW
+// ══════════════════════════════════════════════
+function renderReview(data){
+  const ri=data.currentRound, round=data.roundsData?.[ri]||{};
+  const pls=Object.values(data.players||{});
+  document.getElementById('review-header-label').textContent=`Récap manche ${ri+1}`;
+  document.getElementById('review-title').textContent=`Manche ${ri+1} — Lettre ${round.letter}`;
+  document.getElementById('review-letter-display').textContent=`Tous les mots doivent commencer par "${round.letter}"`;
+  const cont=document.getElementById('review-categories'); cont.innerHTML='';
+  G.config.themes.forEach(t=>{
+    const cat=document.createElement('div'); cat.className='review-category';
+    const hdr=document.createElement('div'); hdr.className='review-cat-header'; hdr.textContent=t; cat.appendChild(hdr);
+    const ans=document.createElement('div'); ans.className='review-answers';
+    pls.forEach(p=>{
+      const val=round.answers?.[p.id]?.[sk(t)]||'';
+      const pt=round.points?.[p.id]?.[sk(t)];
+      const dp=(pt===-1||pt===undefined)?(val?1:0):pt;
+      const row=document.createElement('div'); row.className='review-answer';
+      row.innerHTML=`
+        <div style="width:28px;height:28px;border-radius:50%;background:${p.avatar};display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:0.8rem;flex-shrink:0">${p.pseudo[0].toUpperCase()}</div>
+        <div class="review-player">${p.pseudo}</div>
+        <div class="review-text ${val?'':'empty'}">${val||'— aucune réponse —'}</div>
+        <div class="point-toggle">
+          <div class="pt-btn ${dp===1?'active-1':''}" data-pid="${p.id}" data-key="${sk(t)}" data-ri="${ri}" data-v="1">✓</div>
+          <div class="pt-btn ${dp===0?'active-0':''}" data-pid="${p.id}" data-key="${sk(t)}" data-ri="${ri}" data-v="0">✗</div>
+        </div>`;
+      if(G.isHost){
+        row.querySelectorAll('.pt-btn').forEach(btn=>btn.addEventListener('click',async()=>{
+          if(!G.isHost) return;
+          const {pid,key,ri:roundI,v}=btn.dataset;
+          await dbUpd(G.gameId,{[`roundsData/${roundI}/points/${pid}/${key}`]:+v});
+          row.querySelectorAll('.pt-btn').forEach(b=>{b.classList.remove('active-1','active-0');});
+          btn.classList.add(+v===1?'active-1':'active-0');
+        }));
+      } else {
+        row.querySelectorAll('.pt-btn').forEach(b=>{b.style.opacity='0.5';b.style.cursor='default';});
+      }
+      ans.appendChild(row);
+    });
+    cat.appendChild(ans); cont.appendChild(cat);
+  });
+  document.getElementById('validate-review-btn').style.display=G.isHost?'inline-flex':'none';
+  document.getElementById('review-wait-msg').style.display=G.isHost?'none':'flex';
+}
+window.validateReview = async () => {
+  const data=await dbGet(G.gameId);
+  const ri=data.currentRound, round=data.roundsData?.[ri]||{};
+  const pls=Object.values(data.players||{});
+  const tots={...(data.totalPoints||{})};
+  pls.forEach(p=>{
+    if(!tots[p.id]) tots[p.id]=0;
+    G.config.themes.forEach(t=>{
+      if(round.points?.[p.id]?.[sk(t)]===1) tots[p.id]++;
+    });
+  });
+  const next=ri+1;
+  if(next>=G.config.nbRounds){
+    await dbUpd(G.gameId,{totalPoints:tots,phase:'results',currentRound:next});
+  } else {
+    await dbUpd(G.gameId,{totalPoints:tots});
+    const fresh=await dbGet(G.gameId);
+    await launchRound({...fresh,currentRound:next},next);
+  }
+};
+
+// ══════════════════════════════════════════════
+// RESULTS
+// ══════════════════════════════════════════════
+function showResults(data){
+  showScreen('results-screen');
+  const pls=Object.values(data.players||{}), tots=data.totalPoints||{};
+  const sorted=[...pls].sort((a,b)=>(tots[b.id]||0)-(tots[a.id]||0));
+  const pod=document.getElementById('podium-area');
+  if(sorted.length>=3){
+    pod.innerHTML=`<div class="podium" style="margin-bottom:24px">
+      <div class="podium-item"><div class="podium-bar p2">🥈</div><div class="podium-name">${sorted[1].pseudo}</div><div class="podium-score">${tots[sorted[1].id]||0} pts</div></div>
+      <div class="podium-item"><div class="podium-bar p1">🥇</div><div class="podium-name">${sorted[0].pseudo}</div><div class="podium-score">${tots[sorted[0].id]||0} pts</div></div>
+      <div class="podium-item"><div class="podium-bar p3">🥉</div><div class="podium-name">${sorted[2].pseudo}</div><div class="podium-score">${tots[sorted[2].id]||0} pts</div></div>
+    </div>`;
+  } else pod.innerHTML='';
+  const rank=document.getElementById('ranking-list'); rank.innerHTML='';
+  sorted.forEach((p,i)=>{
+    const it=document.createElement('div'); it.className='rank-item';
+    it.innerHTML=`<div class="rank-pos ${i<3?'top':''}">${i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1}</div><div class="rank-avatar" style="background:${p.avatar}">${p.pseudo[0].toUpperCase()}</div><div class="rank-name">${p.pseudo}</div><div class="rank-score">${tots[p.id]||0}<span style="font-size:.75rem;color:var(--muted);font-family:var(--font-body)"> pts</span></div>`;
+    rank.appendChild(it);
+  });
+}
+window.restartGame = async () => {
+  if(!G.isHost){showToast("Seul l'hôte peut relancer.");return;}
+  const data=await dbGet(G.gameId);
+  const pls=Object.values(data.players||{}); const rt={};
+  pls.forEach(p=>rt[p.id]=0);
+  await dbUpd(G.gameId,{phase:'lobby',currentRound:0,roundsData:{},totalPoints:rt,currentLetter:''});
+  showScreen('lobby-screen');
+  document.getElementById('invite-url').textContent=`${location.origin}${location.pathname}?game=${G.gameId}`;
+  document.getElementById('player-count').textContent=`${pls.length} / ${G.config.nbPlayers}`;
+  renderPlayerList(pls,G.config.nbPlayers);
+};
+window.newGame=()=>location.href=location.pathname;
+
+// ══════════════════════════════════════════════
+// UTILS
+// ══════════════════════════════════════════════
+window.showScreen=id=>{document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');scrollTo(0,0);};
+window.showToast=msg=>{const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2800);};
+window.showStopOverlay=(msg,cb)=>{const ov=document.getElementById('stop-overlay');document.getElementById('stop-message').textContent=msg;ov.classList.add('show');setTimeout(()=>{ov.classList.remove('show');cb&&cb();},1800);};
+window.addTheme=addTheme;
+
+// ══════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded',async()=>{
+  initSetup();
+  const joined=await checkJoin();
+  if(!joined) showScreen('setup-screen');
+});
+</script>
+
+<style>
+:root{--ink:#0f0f0f;--paper:#f5f0e8;--cream:#ede8dc;--accent:#e63946;--accent2:#457b9d;--gold:#f4a261;--green:#2a9d8f;--light:#ffffff;--muted:#888;--border:#d4cfc4;--shadow:0 4px 24px rgba(0,0,0,.10);--radius:16px;--font-display:'Playfair Display',serif;--font-body:'DM Sans',sans-serif}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);font-family:var(--font-body);min-height:100vh;overflow-x:hidden}
+.bg-dots{position:fixed;inset:0;z-index:0;pointer-events:none;background-image:radial-gradient(circle,#c9bfaf 1px,transparent 1px);background-size:28px 28px;opacity:.35}
+.screen{display:none;min-height:100vh;position:relative;z-index:1}
+.screen.active{display:flex;flex-direction:column;align-items:center}
+.site-header{width:100%;padding:24px 40px 16px;display:flex;align-items:center;gap:16px;border-bottom:2px solid var(--border);background:var(--paper);position:sticky;top:0;z-index:100}
+.logo{font-family:var(--font-display);font-size:2rem;font-weight:900;color:var(--ink);letter-spacing:-1px}
+.logo span{color:var(--accent)}
+.header-sub{font-size:.8rem;color:var(--muted);letter-spacing:2px;text-transform:uppercase;margin-left:auto}
+.card{background:var(--light);border:2px solid var(--border);border-radius:var(--radius);padding:32px;box-shadow:var(--shadow)}
+.section-title{font-family:var(--font-display);font-size:1.5rem;margin-bottom:20px;color:var(--ink);display:flex;align-items:center;gap:10px}
+.section-title .dot{width:10px;height:10px;border-radius:50%;background:var(--accent);display:inline-block}
+label{font-size:.85rem;font-weight:600;color:var(--ink);letter-spacing:.5px;display:block;margin-bottom:6px}
+input[type=text],input[type=number],select{width:100%;padding:12px 16px;border:2px solid var(--border);border-radius:10px;font-family:var(--font-body);font-size:.95rem;background:var(--paper);color:var(--ink);transition:border-color .2s,box-shadow .2s;outline:none}
+input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(230,57,70,.12)}
+.form-group{margin-bottom:20px}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:13px 28px;border:2px solid var(--ink);border-radius:10px;font-family:var(--font-body);font-size:.95rem;font-weight:600;cursor:pointer;transition:all .15s;text-decoration:none;user-select:none;background:transparent}
+.btn-primary{background:var(--ink);color:var(--light)}
+.btn-primary:hover{background:var(--accent);border-color:var(--accent);transform:translateY(-1px);box-shadow:0 6px 20px rgba(230,57,70,.25)}
+.btn-secondary{background:transparent;color:var(--ink)}
+.btn-secondary:hover{background:var(--cream)}
+.btn-accent{background:var(--accent);color:var(--light);border-color:var(--accent)}
+.btn-accent:hover{background:#c62333;border-color:#c62333;transform:translateY(-1px)}
+.btn-green{background:var(--green);color:var(--light);border-color:var(--green)}
+.btn-green:hover{background:#228b7e;border-color:#228b7e}
+.btn-sm{padding:8px 16px;font-size:.82rem}
+.btn-lg{padding:16px 40px;font-size:1.05rem}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.chip-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:var(--cream);border:1.5px solid var(--border);border-radius:999px;font-size:.82rem;font-weight:500}
+.chip .remove{cursor:pointer;color:var(--muted);font-size:1rem;line-height:1;transition:color .15s}
+.chip .remove:hover{color:var(--accent)}
+.letters-grid{display:flex;flex-wrap:wrap;gap:6px}
+.letter-btn{width:38px;height:38px;border:2px solid var(--border);border-radius:8px;background:var(--paper);font-family:var(--font-display);font-size:1rem;font-weight:900;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center}
+.letter-btn:hover{border-color:var(--accent);color:var(--accent)}
+.letter-btn.excluded{background:var(--accent);border-color:var(--accent);color:var(--light)}
+.radio-group{display:flex;gap:10px;flex-wrap:wrap}
+.radio-option{flex:1;min-width:120px;padding:12px 16px;border:2px solid var(--border);border-radius:10px;cursor:pointer;text-align:center;font-size:.88rem;font-weight:500;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:6px}
+.radio-option:hover{border-color:var(--accent2)}
+.radio-option.selected{background:var(--ink);border-color:var(--ink);color:var(--light)}
+#setup-screen{padding-bottom:60px}
+.setup-container{width:100%;max-width:860px;padding:40px 20px;display:flex;flex-direction:column;gap:24px}
+@media(max-width:700px){.form-row{grid-template-columns:1fr}}
+#lobby-screen .lobby-container{max-width:600px;width:100%;padding:40px 20px;display:flex;flex-direction:column;gap:24px}
+.invite-box{background:var(--cream);border:2px dashed var(--border);border-radius:var(--radius);padding:20px 24px;text-align:center}
+.invite-url{font-size:.82rem;color:var(--muted);word-break:break-all;margin-bottom:12px}
+.player-list{display:flex;flex-direction:column;gap:10px}
+.player-item{display:flex;align-items:center;gap:12px;padding:12px 16px;border:2px solid var(--border);border-radius:10px;background:var(--paper)}
+.player-avatar{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.9rem;color:var(--light);flex-shrink:0}
+.player-name{font-weight:600}
+.player-badge{margin-left:auto;font-size:.75rem;color:var(--muted);background:var(--cream);padding:3px 10px;border-radius:999px;border:1.5px solid var(--border)}
+#join-screen .join-container{max-width:460px;width:100%;padding:40px 20px;display:flex;flex-direction:column;gap:24px;text-align:center}
+.join-hero{font-family:var(--font-display);font-size:3.5rem;font-weight:900;line-height:1}
+.join-hero span{color:var(--accent)}
+#game-screen{background:var(--paper)}
+.game-top{width:100%;background:var(--light);border-bottom:2px solid var(--border);padding:16px 32px;display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+.game-letter{font-family:var(--font-display);font-size:4rem;font-weight:900;color:var(--accent);line-height:1;min-width:60px;text-align:center}
+.game-info{display:flex;flex-direction:column;gap:2px}
+.game-round{font-size:.8rem;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+.game-status{font-size:1rem;font-weight:600}
+.timer-display{margin-left:auto;font-family:var(--font-display);font-size:2.2rem;font-weight:900;color:var(--ink);min-width:70px;text-align:right}
+.timer-display.danger{color:var(--accent);animation:pulse .8s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.game-body{width:100%;max-width:920px;padding:32px 20px;display:flex;flex-direction:column;gap:16px}
+.category-row{display:grid;grid-template-columns:180px 1fr;border:2px solid var(--border);border-radius:12px;overflow:hidden;background:var(--light);transition:border-color .2s}
+.category-row:focus-within{border-color:var(--accent)}
+.cat-label{background:var(--cream);padding:14px 18px;font-size:.88rem;font-weight:600;border-right:2px solid var(--border);display:flex;align-items:center}
+.cat-input{border:none!important;border-radius:0!important;background:var(--light)!important;padding:14px 18px!important;box-shadow:none!important;font-size:1rem}
+.cat-input:focus{box-shadow:none!important}
+#review-screen .review-container{max-width:900px;width:100%;padding:32px 20px;display:flex;flex-direction:column;gap:20px}
+.review-category{background:var(--light);border:2px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.review-cat-header{background:var(--ink);color:var(--light);padding:12px 20px;font-weight:700;font-size:.95rem}
+.review-answers{display:flex;flex-direction:column}
+.review-answer{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1.5px solid var(--border)}
+.review-answer:last-child{border-bottom:none}
+.review-player{font-weight:600;min-width:130px;font-size:.9rem}
+.review-text{flex:1;font-size:.95rem}
+.review-text.empty{color:var(--muted);font-style:italic;font-size:.88rem}
+.point-toggle{display:flex;gap:6px;margin-left:auto;flex-shrink:0}
+.pt-btn{width:36px;height:36px;border:2px solid var(--border);border-radius:8px;font-weight:700;font-size:.9rem;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;background:var(--paper)}
+.pt-btn.active-1{background:var(--green);border-color:var(--green);color:var(--light)}
+.pt-btn.active-0{background:var(--accent);border-color:var(--accent);color:var(--light)}
+.pt-btn:hover{border-color:var(--ink)}
+#results-screen .results-container{max-width:700px;width:100%;padding:40px 20px;display:flex;flex-direction:column;gap:24px}
+.podium{display:flex;align-items:flex-end;justify-content:center;gap:12px}
+.podium-item{display:flex;flex-direction:column;align-items:center;gap:8px;flex:1;max-width:160px}
+.podium-bar{width:100%;border-radius:12px 12px 0 0;display:flex;align-items:center;justify-content:center;color:var(--light);font-family:var(--font-display);font-weight:900}
+.podium-bar.p1{height:120px;background:var(--gold);font-size:2.5rem}
+.podium-bar.p2{height:90px;background:#b0bec5;font-size:2rem}
+.podium-bar.p3{height:70px;background:#a1887f;font-size:1.6rem}
+.podium-name{font-weight:700;font-size:.9rem;text-align:center}
+.podium-score{font-size:.8rem;color:var(--muted)}
+.ranking{display:flex;flex-direction:column;gap:8px}
+.rank-item{display:flex;align-items:center;gap:14px;padding:14px 20px;background:var(--light);border:2px solid var(--border);border-radius:12px}
+.rank-pos{font-family:var(--font-display);font-size:1.4rem;font-weight:900;min-width:32px;color:var(--muted)}
+.rank-pos.top{color:var(--gold)}
+.rank-avatar{width:36px;height:36px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--light);font-size:.9rem}
+.rank-name{font-weight:600;font-size:.95rem;flex:1}
+.rank-score{font-family:var(--font-display);font-size:1.5rem;font-weight:900}
+.stopped-overlay{position:fixed;inset:0;z-index:150;background:rgba(230,57,70,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--light);opacity:0;pointer-events:none;transition:opacity .3s}
+.stopped-overlay.show{opacity:1;pointer-events:all}
+.stopped-overlay h1{font-family:var(--font-display);font-size:5rem;font-weight:900}
+.stopped-overlay p{font-size:1.2rem;margin-top:8px;opacity:.85}
+.letter-bounce{display:inline-block;animation:bounceIn .5s cubic-bezier(.36,.07,.19,.97)}
+@keyframes bounceIn{0%{transform:scale(.3);opacity:0}60%{transform:scale(1.15)}80%{transform:scale(.95)}100%{transform:scale(1);opacity:1}}
+.progress-bar{height:4px;background:var(--cream);border-radius:999px;overflow:hidden}
+.progress-fill{height:100%;background:var(--accent);border-radius:999px;transition:width .1s linear}
+.toast{position:fixed;bottom:32px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--light);padding:12px 24px;border-radius:999px;font-size:.9rem;font-weight:500;z-index:300;opacity:0;transition:all .3s;pointer-events:none}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.text-muted{color:var(--muted);font-size:.85rem}
+.text-center{text-align:center}
+.mt-8{margin-top:8px}
+.flex-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.warn-banner{background:#fff8e1;border:2px solid #ffc107;border-radius:12px;padding:16px 20px;font-size:.88rem;display:flex;gap:12px;align-items:flex-start;margin-bottom:4px}
+.warn-banner strong{display:block;margin-bottom:4px;font-size:.95rem}
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:var(--cream)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:999px}
+</style>
+</head>
+<body>
+<div class="bg-dots"></div>
+<div class="toast" id="toast"></div>
+
+<!-- SETUP -->
+<div class="screen" id="setup-screen">
+  <div class="site-header"><div class="logo">Petit <span>Bac</span></div><div class="header-sub">Configuration</div></div>
+  <div class="setup-container">
+    <div class="warn-banner">
+      <span style="font-size:1.4rem;flex-shrink:0">⚙️</span>
+      <div><strong>Étape requise : configurez Firebase</strong>Ouvrez ce fichier HTML dans un éditeur, trouvez le bloc <code>firebaseConfig</code> en haut et remplacez les valeurs par celles de votre projet Firebase. Consultez le guide fourni ci-joint.</div>
+    </div>
+    <div class="card">
+      <div class="section-title"><span class="dot"></span>Joueurs & Manches</div>
+      <div class="form-row">
+        <div class="form-group"><label>Nombre de joueurs</label><input type="number" id="nb-players" min="2" max="12" value="4"></div>
+        <div class="form-group"><label>Nombre de manches</label><input type="number" id="nb-rounds" min="1" max="20" value="5"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="section-title"><span class="dot"></span>Thèmes / Catégories</div>
+      <div class="flex-row" style="margin-bottom:12px">
+        <input type="text" id="theme-input" placeholder="Ex : Ville, Animal, Acteur..." style="flex:1;max-width:320px">
+        <button class="btn btn-secondary btn-sm" onclick="addTheme()">+ Ajouter</button>
+      </div>
+      <div class="chip-list" id="themes-list"></div>
+      <div class="text-muted mt-8">Thèmes par défaut si aucun ajouté : Prénom, Ville, Animal, Objet, Métier</div>
+    </div>
+    <div class="card">
+      <div class="section-title"><span class="dot"></span>Lettres exclues</div>
+      <p class="text-muted" style="margin-bottom:14px">Cliquez pour exclure une lettre du tirage.</p>
+      <div class="letters-grid" id="letters-grid"></div>
+    </div>
+    <div class="card">
+      <div class="section-title"><span class="dot"></span>Mode de jeu</div>
+      <div class="radio-group" id="mode-group">
+        <div class="radio-option selected" data-mode="timer" onclick="selectMode(this)">⏱ Timer</div>
+        <div class="radio-option" data-mode="stop-individual" onclick="selectMode(this)">🙋 Stop individuel</div>
+        <div class="radio-option" data-mode="stop-common" onclick="selectMode(this)">🛑 Stop commun</div>
+        <div class="radio-option" data-mode="first-stop" onclick="selectMode(this)">⚡ 1er terminé</div>
+      </div>
+      <div id="timer-options" style="margin-top:16px">
+        <label>Durée du timer (secondes)</label>
+        <input type="number" id="timer-duration" value="90" min="10" max="600" style="max-width:160px">
+      </div>
+    </div>
+    <button class="btn btn-primary btn-lg" style="align-self:flex-end" onclick="createGame()">Créer la partie →</button>
+  </div>
+</div>
+
+<!-- LOBBY -->
+<div class="screen" id="lobby-screen">
+  <div class="site-header"><div class="logo">Petit <span>Bac</span></div><div class="header-sub">Lobby</div></div>
+  <div class="lobby-container">
+    <div class="card">
+      <div class="section-title"><span class="dot"></span>Votre pseudo</div>
+      <div class="flex-row">
+        <input type="text" id="host-pseudo" placeholder="Votre pseudo..." style="flex:1;max-width:260px">
+        <button class="btn btn-secondary btn-sm" onclick="setHostPseudo()">Valider</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="section-title"><span class="dot"></span>Invitez vos amis</div>
+      <div class="invite-box">
+        <div class="invite-url" id="invite-url">—</div>
+        <button class="btn btn-secondary btn-sm" onclick="copyLink()">📋 Copier le lien</button>
+      </div>
+      <p class="text-muted mt-8">Chaque joueur ouvre ce lien sur son appareil et choisit un pseudo.</p>
+    </div>
+    <div class="card">
+      <div class="section-title"><span class="dot"></span>Joueurs connectés <span id="player-count" style="font-size:1rem;color:var(--muted);margin-left:6px">0 / ?</span></div>
+      <div class="player-list" id="player-list"></div>
+    </div>
+    <div class="flex-row" style="justify-content:flex-end">
+      <button class="btn btn-primary btn-lg" onclick="startGame()">Lancer la partie ▶</button>
+    </div>
+  </div>
+</div>
+
+<!-- JOIN -->
+<div class="screen" id="join-screen">
+  <div class="site-header"><div class="logo">Petit <span>Bac</span></div></div>
+  <div class="join-container">
+    <div class="join-hero">Rejoindre<br>la <span>partie</span></div>
+    <div class="card">
+      <div class="form-group"><label>Choisissez votre pseudo</label><input type="text" id="join-pseudo" placeholder="Ex : Camille..."></div>
+      <button class="btn btn-accent btn-lg" style="width:100%" onclick="joinGame()">Rejoindre →</button>
+    </div>
+    <p class="text-muted text-center">La partie commencera quand l'hôte lancera le jeu.</p>
+  </div>
+</div>
+
+<!-- WAIT -->
+<div class="screen" id="wait-screen">
+  <div class="site-header"><div class="logo">Petit <span>Bac</span></div></div>
+  <div style="max-width:460px;width:100%;padding:60px 20px;text-align:center;display:flex;flex-direction:column;gap:20px;align-items:center">
+    <div style="font-size:3rem">⏳</div>
+    <div class="section-title" style="justify-content:center">En attente du lancement...</div>
+    <p class="text-muted">L'hôte va bientôt lancer la partie. Restez prêt·e !</p>
+    <div class="card" style="width:100%;text-align:left">
+      <div class="text-muted" style="margin-bottom:8px;font-weight:600">Votre pseudo :</div>
+      <div style="font-size:1.2rem;font-weight:700" id="wait-pseudo-display">—</div>
+    </div>
+  </div>
+</div>
+
+<!-- GAME -->
+<div class="screen" id="game-screen">
+  <div class="game-top">
+    <div class="game-letter" id="current-letter"><span>A</span></div>
+    <div class="game-info">
+      <div class="game-round" id="round-label">Manche 1 / 5</div>
+      <div class="game-status" id="game-status">Remplissez les cases !</div>
+    </div>
+    <div class="timer-display" id="timer-display" style="display:none">1:30</div>
+    <button class="btn btn-accent" id="stop-btn" onclick="playerStop()" style="display:none">STOP !</button>
+  </div>
+  <div style="padding:8px 32px 0;width:100%"><div class="progress-bar" id="progress-area"><div class="progress-fill" id="progress-fill" style="width:100%"></div></div></div>
+  <div class="game-body" id="categories-form"></div>
+</div>
+
+<!-- REVIEW -->
+<div class="screen" id="review-screen">
+  <div class="site-header"><div class="logo">Petit <span>Bac</span></div><div class="header-sub" id="review-header-label">Récap</div></div>
+  <div class="review-container">
+    <div class="card" style="text-align:center;padding:20px 24px">
+      <div style="font-size:2rem;margin-bottom:6px">📋</div>
+      <div style="font-weight:700;font-size:1.1rem" id="review-title">Récapitulatif</div>
+      <div class="text-muted mt-8" id="review-letter-display"></div>
+    </div>
+    <div id="review-categories"></div>
+    <div class="flex-row" style="justify-content:flex-end">
+      <div id="review-wait-msg" style="display:none;align-items:center;gap:8px;color:var(--muted);font-style:italic">⏳ En attente que l'hôte valide les points...</div>
+      <button id="validate-review-btn" class="btn btn-green btn-lg" onclick="validateReview()">Valider les points →</button>
+    </div>
+  </div>
+</div>
+
+<!-- RESULTS -->
+<div class="screen" id="results-screen">
+  <div class="site-header"><div class="logo">Petit <span>Bac</span></div><div class="header-sub">Résultats 🏆</div></div>
+  <div class="results-container">
+    <div id="podium-area"></div>
+    <div class="card"><div class="section-title"><span class="dot"></span>Classement</div><div class="ranking" id="ranking-list"></div></div>
+    <div class="flex-row" style="justify-content:center;margin-top:8px">
+      <button class="btn btn-primary btn-lg" onclick="restartGame()">🔁 Rejouer</button>
+      <button class="btn btn-secondary btn-lg" onclick="newGame()">🏠 Nouvelle partie</button>
+    </div>
+  </div>
+</div>
+
+<!-- STOP OVERLAY -->
+<div class="stopped-overlay" id="stop-overlay">
+  <h1>STOP !</h1>
+  <p id="stop-message">La manche est terminée</p>
+</div>
+</body>
+</html>
