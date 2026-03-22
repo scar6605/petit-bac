@@ -335,7 +335,9 @@ function startListener() {
     if(phase === 'game' && G.isHost && data.stoppedBy) {
       clearInterval(G.timerIv);
       const who = data.players?.[data.stoppedBy]?.pseudo || 'Un joueur';
-      saveMyAnswers(data.currentRound).then(() => endRound(data.currentRound, `${who} a dit STOP !`));
+      // Sauvegarder les réponses de l'hôte AVANT de passer en review
+      await saveMyAnswers(data.currentRound);
+      await endRound(data.currentRound, `${who} a dit STOP !`);
       return;
     }
     // Stop individuel : vérifier si tous les joueurs ont fini
@@ -344,7 +346,8 @@ function startListener() {
       const stopped = Object.keys(data.stoppedPlayers);
       if(pls.length > 0 && pls.every(id => stopped.includes(id))) {
         clearInterval(G.timerIv);
-        saveMyAnswers(data.currentRound).then(() => endRound(data.currentRound, 'Tout le monde a fini !'));
+        await saveMyAnswers(data.currentRound);
+        await endRound(data.currentRound, 'Tout le monde a fini !');
         return;
       }
       // Afficher combien de joueurs ont fini
@@ -417,6 +420,13 @@ async function launchRound(data, roundIdx) {
 // ══════════════════════════════════════════════
 // GAME SCREEN
 // ══════════════════════════════════════════════
+let autoSaveTimeout = null;
+
+function scheduleAutoSave(roundIdx) {
+  clearTimeout(autoSaveTimeout);
+  autoSaveTimeout = setTimeout(() => saveMyAnswers(roundIdx), 600);
+}
+
 function renderGameScreen(data) {
   document.getElementById('round-label').textContent = `Manche ${data.currentRound + 1} / ${G.config.nbRounds}`;
   document.getElementById('current-letter').innerHTML = `<span class="letter-bounce">${data.currentLetter}</span>`;
@@ -425,6 +435,8 @@ function renderGameScreen(data) {
   G.config.themes.forEach(t => {
     const row = document.createElement('div'); row.className = 'category-row';
     row.innerHTML = `<div class="cat-label">${t}</div><input class="cat-input" type="text" id="cat-${sk(t)}" placeholder="${t} en ${data.currentLetter}...">`;
+    // Sauvegarde automatique à chaque frappe
+    row.querySelector('input').addEventListener('input', () => scheduleAutoSave(data.currentRound));
     form.appendChild(row);
   });
   const timerEl = document.getElementById('timer-display'), stopBtn = document.getElementById('stop-btn'), prog = document.getElementById('progress-area');
@@ -545,18 +557,42 @@ window.validateReview = async () => {
   const data  = await dbGet(G.gameId);
   const ri    = data.currentRound, round = data.roundsData?.[ri] || {};
   const pls   = Object.values(data.players || {});
-  const tots  = { ...(data.totalPoints || {}) };
+
+  // 1. D'abord pousser tous les points "auto" (-1) vers Firebase
+  //    (les réponses non touchées par l'hôte ont encore -1 dans Firebase)
+  const pointsUpd = {};
+  pls.forEach(p => {
+    G.config.themes.forEach(t => {
+      const stored = round.points?.[p.id]?.[sk(t)];
+      if(stored === -1 || stored === undefined) {
+        const val = round.answers?.[p.id]?.[sk(t)] || '';
+        const auto = val ? 1 : 0;
+        pointsUpd[`roundsData/${ri}/points/${p.id}/${sk(t)}`] = auto;
+      }
+    });
+  });
+  if(Object.keys(pointsUpd).length > 0) await dbUpd(G.gameId, pointsUpd);
+
+  // 2. Relire les données fraiches avec tous les points à jour
+  const fresh = await dbGet(G.gameId);
+  const freshRound = fresh.roundsData?.[ri] || {};
+  const tots = { ...(fresh.totalPoints || {}) };
+
+  // 3. Additionner uniquement les points === 1
   pls.forEach(p => {
     if(!tots[p.id]) tots[p.id] = 0;
-    G.config.themes.forEach(t => { if(round.points?.[p.id]?.[sk(t)] === 1) tots[p.id]++; });
+    G.config.themes.forEach(t => {
+      if(freshRound.points?.[p.id]?.[sk(t)] === 1) tots[p.id]++;
+    });
   });
+
   const next = ri + 1;
   if(next >= G.config.nbRounds) {
     await dbUpd(G.gameId, { totalPoints:tots, phase:'results', currentRound:next });
   } else {
     await dbUpd(G.gameId, { totalPoints:tots });
-    const fresh = await dbGet(G.gameId);
-    await launchRound({ ...fresh, currentRound:next }, next);
+    const fresh2 = await dbGet(G.gameId);
+    await launchRound({ ...fresh2, currentRound:next }, next);
   }
 };
 
@@ -718,16 +754,17 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(23
 .review-category{background:var(--light);border:2px solid var(--border);border-radius:var(--radius);overflow:hidden}
 .review-cat-header{background:var(--ink);color:var(--light);padding:12px 20px;font-weight:700;font-size:.95rem}
 .review-answers{display:flex;flex-direction:column}
-.review-answer{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1.5px solid var(--border)}
+.review-answer{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1.5px solid var(--border);min-width:0}
 .review-answer:last-child{border-bottom:none}
-.review-player{font-weight:600;min-width:130px;font-size:.9rem}
-.review-text{flex:1;font-size:.95rem}
+.review-player{font-weight:600;min-width:90px;max-width:110px;font-size:.9rem;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.review-text{flex:1;font-size:.95rem;min-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .review-text.empty{color:var(--muted);font-style:italic;font-size:.88rem}
-.point-toggle{display:flex;gap:6px;margin-left:auto;flex-shrink:0}
-.pt-btn{width:36px;height:36px;border:2px solid var(--border);border-radius:8px;font-weight:700;font-size:.9rem;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;background:var(--paper)}
+.point-toggle{display:flex;gap:6px;flex-shrink:0;margin-left:8px}
+.pt-btn{width:40px;height:40px;border:2px solid var(--border);border-radius:8px;font-weight:700;font-size:.9rem;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;background:var(--paper)}
 .pt-btn.active-1{background:var(--green);border-color:var(--green);color:var(--light)}
 .pt-btn.active-0{background:var(--accent);border-color:var(--accent);color:var(--light)}
 .pt-btn:hover{border-color:var(--ink)}
+.review-sticky-bar{position:sticky;bottom:0;background:var(--paper);border-top:2px solid var(--border);padding:16px 20px;display:flex;justify-content:flex-end;align-items:center;gap:12px;width:100%;z-index:50;margin-top:8px}
 #results-screen .results-container{max-width:700px;width:100%;padding:40px 20px;display:flex;flex-direction:column;gap:24px}
 .podium{display:flex;align-items:flex-end;justify-content:center;gap:12px}
 .podium-item{display:flex;flex-direction:column;align-items:center;gap:8px;flex:1;max-width:160px}
@@ -910,10 +947,11 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(23
       <div class="text-muted mt-8" id="review-letter-display"></div>
     </div>
     <div id="review-categories"></div>
-    <div class="flex-row" style="justify-content:flex-end">
-      <div id="review-wait-msg" style="display:none;align-items:center;gap:8px;color:var(--muted);font-style:italic">⏳ En attente que l'hôte valide les points...</div>
-      <button id="validate-review-btn" class="btn btn-green btn-lg" onclick="validateReview()">Valider les points →</button>
-    </div>
+    <div style="height:80px"></div>
+  </div>
+  <div class="review-sticky-bar">
+    <div id="review-wait-msg" style="display:none;align-items:center;gap:8px;color:var(--muted);font-style:italic">⏳ En attente que l'hôte valide les points...</div>
+    <button id="validate-review-btn" class="btn btn-green btn-lg" onclick="validateReview()">Valider les points →</button>
   </div>
 </div>
 
