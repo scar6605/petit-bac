@@ -14,6 +14,8 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
@@ -172,6 +174,8 @@ window.createGame = async () => {
     showScreen('lobby-screen');
     document.getElementById('invite-url').textContent = `${location.origin}${location.pathname}?game=${id}`;
     document.getElementById('player-count').textContent = `0 / ${nbP}`;
+    document.getElementById('game-code-display').textContent = id;
+    setTimeout(() => generateQR(id), 200);
     startHeartbeat();
     startListener();
   } catch(e) { showToast('Erreur Firebase – vérifiez votre config'); console.error(e); }
@@ -557,9 +561,11 @@ window.restartGame = async () => {
   showScreen('lobby-screen');
   document.getElementById('invite-url').textContent = `${location.origin}${location.pathname}?game=${G.gameId}`;
   document.getElementById('player-count').textContent = `${pls.length} / ${G.config.nbPlayers}`;
+  document.getElementById('game-code-display').textContent = G.gameId;
+  setTimeout(() => generateQR(G.gameId), 200);
   renderPlayerList(pls, G.config.nbPlayers);
 };
-window.newGame = () => location.href = location.pathname;
+window.newGame = () => { showScreen('home-screen'); };
 
 window.cancelGame = async () => {
   if(!G.isHost) return;
@@ -569,7 +575,7 @@ window.cancelGame = async () => {
   clearInterval(G.timerIv); clearInterval(G.heartbeatIv); clearInterval(G.hostWatcherIv);
   window.removeEventListener('beforeunload', stopHeartbeat);
   G.gameId = null; G.myId = null; G.isHost = false;
-  showScreen('setup-screen');
+  showScreen('home-screen');
 };
 
 window.kickPlayer = async (playerId) => {
@@ -590,12 +596,104 @@ window.showStopOverlay = (msg,cb) => { const ov=document.getElementById('stop-ov
 window.addTheme = addTheme;
 
 // ══════════════════════════════════════════════
+// ACCUEIL
+// ══════════════════════════════════════════════
+window.goToSetup = () => showScreen('setup-screen');
+window.goToJoinEntry = () => showScreen('join-entry-screen');
+
+// ══════════════════════════════════════════════
+// REJOINDRE PAR CODE
+// ══════════════════════════════════════════════
+window.joinByCode = async () => {
+  const code = document.getElementById('game-code-input').value.trim().toUpperCase();
+  if(code.length < 4) { showToast('Entrez un code valide !'); return; }
+  G.gameId = code;
+  const data = await dbGet(code);
+  if(!data) { showToast('Partie introuvable !'); return; }
+  if(data.phase === 'cancelled') { showScreen('cancelled-screen'); return; }
+  if(data.phase === 'lobby' && !isHostAlive(data)) { showToast('Cette partie n\'est plus active.'); return; }
+  G.config = data.config;
+  showScreen('join-screen');
+};
+
+// ══════════════════════════════════════════════
+// QR CODE (génération dans le lobby)
+// ══════════════════════════════════════════════
+function generateQR(gameId) {
+  const el = document.getElementById('qr-container');
+  if(!el) return;
+  el.innerHTML = '';
+  // On utilise QRCode.js via CDN
+  new QRCode(el, {
+    text: gameId,
+    width: 180, height: 180,
+    colorDark: '#8A3A29',
+    colorLight: '#FDF6EC',
+    correctLevel: QRCode.CorrectLevel.M
+  });
+}
+
+// ══════════════════════════════════════════════
+// SCANNER QR CODE (caméra)
+// ══════════════════════════════════════════════
+let scannerStream = null;
+
+window.openScanner = async () => {
+  showScreen('scanner-screen');
+  const video = document.getElementById('scanner-video');
+  try {
+    scannerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    video.srcObject = scannerStream;
+    video.play();
+    scanFrame(video);
+  } catch(e) {
+    showToast('Caméra non accessible'); showScreen('join-entry-screen');
+  }
+};
+
+window.closeScanner = () => {
+  if(scannerStream) { scannerStream.getTracks().forEach(t => t.stop()); scannerStream = null; }
+  showScreen('join-entry-screen');
+};
+
+function scanFrame(video) {
+  if(!scannerStream) return;
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth || 320;
+  canvas.height = video.videoHeight || 240;
+  const ctx = canvas.getContext('2d');
+  const tick = () => {
+    if(!scannerStream) return;
+    if(video.readyState === video.HAVE_ENOUGH_DATA) {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      try {
+        const code = jsQR(imgData.data, imgData.width, imgData.height);
+        if(code?.data) {
+          // Extraire le gameId : soit c'est directement le code, soit c'est une URL avec ?game=
+          let gid = code.data;
+          if(gid.includes('?game=')) gid = new URLSearchParams(gid.split('?')[1]).get('game');
+          if(gid && gid.length >= 4) {
+            closeScanner();
+            document.getElementById('game-code-input').value = gid;
+            joinByCode();
+            return;
+          }
+        }
+      } catch(e) {}
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+// ══════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', async () => {
   initSetup();
   const joined = await checkJoin();
-  if(!joined) showScreen('setup-screen');
+  if(!joined) showScreen('home-screen');
 });
 </script>
 
@@ -758,6 +856,32 @@ input:focus,select:focus{border-color:var(--ink);box-shadow:0 0 0 3px rgba(138,5
 .mt-8{margin-top:8px}
 .flex-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 
+/* HOME */
+.home-container{max-width:420px;width:100%;padding:40px 20px;display:flex;flex-direction:column;align-items:center;gap:24px;text-align:center}
+.home-logo-big{margin:8px 0}
+.home-title{font-family:var(--font-display);font-size:3rem;font-weight:900;color:var(--ink);line-height:1}
+.home-title span{display:inline-block;background:var(--ink);color:var(--light);padding:0 12px;border-radius:8px;margin-left:6px}
+.home-subtitle{color:var(--muted);font-size:.95rem}
+.home-btns{display:flex;flex-direction:column;gap:14px;width:100%}
+/* JOIN ENTRY */
+.join-entry-container{max-width:420px;width:100%;padding:40px 20px;display:flex;flex-direction:column;gap:20px}
+.code-input{font-size:1.8rem!important;font-family:var(--font-display)!important;font-weight:900!important;text-align:center;letter-spacing:6px;text-transform:uppercase}
+.scan-btn{display:flex;align-items:center;justify-content:center;gap:10px;padding:16px;border:2px dashed var(--border);border-radius:var(--radius);background:transparent;cursor:pointer;font-family:var(--font-body);font-size:.95rem;font-weight:600;color:var(--ink);width:100%;transition:all .15s}
+.scan-btn:hover{border-color:var(--ink);background:var(--cream)}
+/* SCANNER */
+.scanner-container{width:100%;max-width:500px;padding:20px;display:flex;flex-direction:column;gap:16px;align-items:center}
+#scanner-video{width:100%;max-width:320px;border-radius:var(--radius);border:3px solid var(--ink);background:#000}
+.scanner-frame{position:relative;width:100%;max-width:320px}
+.scanner-corner{position:absolute;width:24px;height:24px;border-color:var(--ink);border-style:solid}
+.sc-tl{top:8px;left:8px;border-width:3px 0 0 3px}
+.sc-tr{top:8px;right:8px;border-width:3px 3px 0 0}
+.sc-bl{bottom:8px;left:8px;border-width:0 0 3px 3px}
+.sc-br{bottom:8px;right:8px;border-width:0 3px 3px 0}
+/* QR dans le lobby */
+.lobby-qr{display:flex;flex-direction:column;align-items:center;gap:12px;padding:20px;background:var(--light);border-radius:var(--radius);border:2px solid var(--border)}
+.game-code-big{font-family:var(--font-display);font-size:2.4rem;font-weight:900;letter-spacing:8px;color:var(--ink)}
+#qr-container img{border-radius:8px}
+
 ::-webkit-scrollbar{width:6px}
 ::-webkit-scrollbar-track{background:var(--cream)}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:999px}
@@ -766,6 +890,7 @@ input:focus,select:focus{border-color:var(--ink);box-shadow:0 0 0 3px rgba(138,5
 <body>
 <div class="bg-dots"></div>
 <div class="toast" id="toast"></div>
+<span id="invite-url" style="display:none"></span>
 
 <!-- Logo SVG inline réutilisable -->
 <template id="logo-tpl">
@@ -776,6 +901,80 @@ input:focus,select:focus{border-color:var(--ink);box-shadow:0 0 0 3px rgba(138,5
     <text x="22" y="32" text-anchor="middle" font-family="Georgia,serif" font-size="24" font-weight="900" fill="#EBD3A9">B</text>
   </svg>
 </template>
+
+<!-- HOME -->
+<div class="screen" id="home-screen">
+  <div class="site-header">
+    <div id="logo-home"></div>
+    <div class="logo-text">Petit Bac</div>
+  </div>
+  <div class="home-container">
+    <div class="home-logo-big">
+      <svg viewBox="0 0 120 120" width="120" height="120" xmlns="http://www.w3.org/2000/svg">
+        <rect x="6" y="16" width="104" height="104" rx="22" fill="#EBD3A9" transform="rotate(-6 60 60)"/>
+        <rect x="6" y="10" width="104" height="104" rx="22" fill="#C4A47F" transform="rotate(-2 60 60)"/>
+        <rect x="6" y="6"  width="104" height="104" rx="22" fill="#8A3A29" transform="rotate(2 60 60)"/>
+        <text x="60" y="92" text-anchor="middle" font-family="'Playfair Display',Georgia,serif" font-size="72" font-weight="900" fill="#EBD3A9">B</text>
+      </svg>
+    </div>
+    <div>
+      <div class="home-title">Petit <span>Bac</span></div>
+      <div class="home-subtitle" style="margin-top:8px">Le jeu des catégories multijoueur</div>
+    </div>
+    <div class="home-btns">
+      <button class="btn btn-primary btn-lg" onclick="goToSetup()" style="font-size:1.1rem;padding:18px">🎮 Créer une partie</button>
+      <button class="btn btn-secondary btn-lg" onclick="goToJoinEntry()" style="font-size:1.1rem;padding:18px">🔗 Rejoindre une partie</button>
+    </div>
+  </div>
+</div>
+
+<!-- JOIN ENTRY (code ou QR) -->
+<div class="screen" id="join-entry-screen">
+  <div class="site-header">
+    <div id="logo-join-entry"></div>
+    <div class="logo-text">Petit Bac</div>
+    <div class="header-sub">Rejoindre</div>
+  </div>
+  <div class="join-entry-container">
+    <div class="card">
+      <div class="section-title"><span class="dot"></span>Entrer le code</div>
+      <div class="form-group">
+        <label>Code de la partie (donné par l'hôte)</label>
+        <input type="text" id="game-code-input" class="code-input" placeholder="ABC123" maxlength="8" autocomplete="off" autocorrect="off" autocapitalize="characters">
+      </div>
+      <button class="btn btn-primary btn-lg" style="width:100%" onclick="joinByCode()">Rejoindre →</button>
+    </div>
+    <div style="text-align:center;color:var(--muted);font-size:.9rem">— ou —</div>
+    <button class="scan-btn" onclick="openScanner()">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="5" height="5"/><rect x="16" y="3" width="5" height="5"/><rect x="3" y="16" width="5" height="5"/>
+        <line x1="21" y1="16" x2="21" y2="21"/><line x1="16" y1="21" x2="21" y2="21"/><line x1="16" y1="16" x2="16" y2="16"/>
+      </svg>
+      Scanner le QR code
+    </button>
+    <button class="btn btn-secondary" onclick="showScreen('home-screen')" style="align-self:center">← Retour</button>
+  </div>
+</div>
+
+<!-- SCANNER QR -->
+<div class="screen" id="scanner-screen">
+  <div class="site-header">
+    <div id="logo-scanner"></div>
+    <div class="logo-text">Petit Bac</div>
+    <div class="header-sub">Scanner</div>
+  </div>
+  <div class="scanner-container">
+    <p class="text-muted text-center">Pointez la caméra vers le QR code affiché par l'hôte</p>
+    <div class="scanner-frame">
+      <video id="scanner-video" playsinline muted></video>
+      <div class="scanner-corner sc-tl"></div>
+      <div class="scanner-corner sc-tr"></div>
+      <div class="scanner-corner sc-bl"></div>
+      <div class="scanner-corner sc-br"></div>
+    </div>
+    <button class="btn btn-secondary" onclick="closeScanner()">✕ Annuler</button>
+  </div>
+</div>
 
 <!-- SETUP -->
 <div class="screen" id="setup-screen">
@@ -839,11 +1038,14 @@ input:focus,select:focus{border-color:var(--ink);box-shadow:0 0 0 3px rgba(138,5
     </div>
     <div class="card">
       <div class="section-title"><span class="dot"></span>Invitez vos amis</div>
-      <div class="invite-box">
-        <div class="invite-url" id="invite-url">—</div>
+      <div class="lobby-qr">
+        <div class="game-code-big" id="game-code-display">——</div>
+        <div class="text-muted" style="font-size:.82rem">Code à donner aux joueurs</div>
+        <div id="qr-container"></div>
+      </div>
+      <div class="flex-row" style="margin-top:12px;justify-content:center">
         <button class="btn btn-secondary btn-sm" onclick="copyLink()">📋 Copier le lien</button>
       </div>
-      <p class="text-muted mt-8">Chaque joueur ouvre ce lien sur son appareil et choisit un pseudo.</p>
     </div>
     <div class="card">
       <div class="section-title"><span class="dot"></span>Joueurs connectés <span id="player-count" style="font-size:1rem;color:var(--muted);margin-left:6px">0 / ?</span></div>
@@ -862,7 +1064,8 @@ input:focus,select:focus{border-color:var(--ink);box-shadow:0 0 0 3px rgba(138,5
   <div style="max-width:460px;width:100%;padding:60px 20px;text-align:center;display:flex;flex-direction:column;gap:20px;align-items:center">
     <div style="font-size:3rem">😕</div>
     <div class="section-title" style="justify-content:center">Partie annulée</div>
-    <p class="text-muted">L'hôte a annulé la partie. Demandez-lui un nouveau lien pour rejoindre une prochaine partie.</p>
+    <p class="text-muted">L'hôte a annulé la partie. Demandez-lui un nouveau code pour rejoindre une prochaine partie.</p>
+    <button class="btn btn-secondary" onclick="showScreen('home-screen')" style="margin-top:8px">🏠 Accueil</button>
   </div>
 </div>
 
@@ -872,20 +1075,21 @@ input:focus,select:focus{border-color:var(--ink);box-shadow:0 0 0 3px rgba(138,5
   <div style="max-width:460px;width:100%;padding:60px 20px;text-align:center;display:flex;flex-direction:column;gap:20px;align-items:center">
     <div style="font-size:3rem">🚫</div>
     <div class="section-title" style="justify-content:center">Vous avez été expulsé</div>
-    <p class="text-muted">L'hôte vous a retiré de la partie. Demandez-lui un nouveau lien si c'est une erreur.</p>
+    <p class="text-muted">L'hôte vous a retiré de la partie. Demandez-lui un nouveau code si c'est une erreur.</p>
+    <button class="btn btn-secondary" onclick="showScreen('home-screen')" style="margin-top:8px">🏠 Accueil</button>
   </div>
 </div>
 
-<!-- JOIN -->
+<!-- JOIN (pseudo après code) -->
 <div class="screen" id="join-screen">
   <div class="site-header"><div id="logo-join"></div><div class="logo-text">Petit Bac</div></div>
   <div class="join-container">
-    <div class="join-hero">Rejoindre<br>la partie</div>
+    <div class="join-hero">Choisissez<br>votre <span>pseudo</span></div>
     <div class="card">
-      <div class="form-group"><label>Choisissez votre pseudo</label><input type="text" id="join-pseudo" placeholder="Ex : Camille..."></div>
+      <div class="form-group"><label>Votre pseudo</label><input type="text" id="join-pseudo" placeholder="Ex : Camille..."></div>
       <button class="btn btn-accent btn-lg" style="width:100%" onclick="joinGame()">Rejoindre →</button>
     </div>
-    <p class="text-muted text-center">La partie commencera quand l'hôte lancera le jeu.</p>
+    <button class="btn btn-secondary" onclick="showScreen('join-entry-screen')" style="align-self:center">← Retour</button>
   </div>
 </div>
 
