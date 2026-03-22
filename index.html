@@ -338,7 +338,28 @@ function startListener() {
       saveMyAnswers(data.currentRound).then(() => endRound(data.currentRound, `${who} a dit STOP !`));
       return;
     }
-    if(phase === 'review' && cur !== 'review-screen') {
+    // Stop individuel : vérifier si tous les joueurs ont fini
+    if(phase === 'game' && G.isHost && G.config?.mode === 'stop-individual' && data.stoppedPlayers) {
+      const pls = Object.keys(data.players || {});
+      const stopped = Object.keys(data.stoppedPlayers);
+      if(pls.length > 0 && pls.every(id => stopped.includes(id))) {
+        clearInterval(G.timerIv);
+        saveMyAnswers(data.currentRound).then(() => endRound(data.currentRound, 'Tout le monde a fini !'));
+        return;
+      }
+      // Afficher combien de joueurs ont fini
+      const cur = document.querySelector('.screen.active')?.id;
+      if(cur === 'game-screen') {
+        document.getElementById('game-status').textContent = `${stopped.length} / ${pls.length} joueurs ont fini...`;
+      }
+      return;
+    }
+    if(phase === 'game' && cur === 'game-screen' && !G.isHost && G.config?.mode === 'stop-individual' && data.stoppedPlayers) {
+      const pls = Object.keys(data.players || {});
+      const stopped = Object.keys(data.stoppedPlayers);
+      document.getElementById('game-status').textContent = `${stopped.length} / ${pls.length} joueurs ont fini...`;
+      return;
+    }
       clearInterval(G.timerIv);
       showStopOverlay('Manche terminée !', () => { showScreen('review-screen'); renderReview(data); });
       return;
@@ -387,7 +408,7 @@ async function launchRound(data, roundIdx) {
     G.config.themes.forEach(t => { answers[p.id][sk(t)] = ''; points[p.id][sk(t)] = -1; });
   });
   await dbUpd(G.gameId, {
-    phase:'game', currentRound:roundIdx, currentLetter:letter, stoppedBy:null,
+    phase:'game', currentRound:roundIdx, currentLetter:letter, stoppedBy:null, stoppedPlayers:null,
     [`roundsData/${roundIdx}`]: { letter, answers, points, startedAt:Date.now() }
   });
 }
@@ -449,7 +470,9 @@ window.playerStop = async () => {
   const data = await dbGet(G.gameId);
   await saveMyAnswers(data.currentRound);
   const mode = G.config.mode;
+
   if(mode === 'first-stop') {
+    // Le 1er qui appuie stoppe tout le monde
     clearInterval(G.timerIv);
     if(G.isHost) await endRound(data.currentRound, 'STOP !');
     else {
@@ -458,9 +481,13 @@ window.playerStop = async () => {
       document.getElementById('stop-btn').textContent = '✓ En attente...';
     }
   } else {
+    // Stop individuel : enregistrer que ce joueur a fini
     document.getElementById('stop-btn').disabled = true;
     document.getElementById('stop-btn').textContent = '✓ En attente...';
     document.getElementById('game-status').textContent = 'En attente des autres joueurs...';
+    // Ajouter ce joueur dans stoppedPlayers
+    await dbUpd(G.gameId, { [`stoppedPlayers/${G.myId}`]: true });
+    // L'hôte vérifie si tout le monde a fini (géré dans le listener)
   }
 };
 
