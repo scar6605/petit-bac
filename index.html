@@ -40,11 +40,11 @@ const ABC     = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 const COLORS  = ['#e63946','#457b9d','#2a9d8f','#f4a261','#6d6875','#e9c46a','#264653','#e76f51'];
 const DEF_TH  = ['Prénom','Ville','Animal','Objet','Métier'];
 const DEF_EX  = ['W','X','Y'];
-const sk      = s => s.replace(/\s/g,'__');
+const sk      = s => s.replace(/\s/g,'__').replace(/[.#$\/\[\]]/g,'--');
 
 let G = {
   gameId:null, myId:null, isHost:false, config:null,
-  unsub:null, timerIv:null, timerLeft:0
+  unsub:null, timerIv:null, timerLeft:0, heartbeatIv:null, hostWatcherIv:null
 };
 let exLetters = new Set();
 let themes    = [];
@@ -175,10 +175,11 @@ window.createGame = async () => {
   G.config = { nbPlayers:nbP, nbRounds:nbR, timerDuration:dur, mode:gameMode, themes:th, activeLetters:active };
   savePrefs();
   try {
-    await dbSet(id, { config:G.config, phase:'lobby', currentRound:0, currentLetter:'', players:{}, roundsData:{}, totalPoints:{}, stoppedBy:null, createdAt:Date.now() });
+    await dbSet(id, { config:G.config, phase:'lobby', currentRound:0, currentLetter:'', players:{}, roundsData:{}, totalPoints:{}, stoppedBy:null, createdAt:Date.now(), hostHeartbeat:Date.now() });
     showScreen('lobby-screen');
     document.getElementById('invite-url').textContent = `${location.origin}${location.pathname}?game=${id}`;
     document.getElementById('player-count').textContent = `0 / ${nbP}`;
+    startHeartbeat();
     startListener();
   } catch(e) { showToast('Erreur Firebase – vérifiez votre config'); console.error(e); }
 };
@@ -197,6 +198,59 @@ window.copyLink = () => navigator.clipboard.writeText(document.getElementById('i
   .then(() => showToast('Lien copié !')).catch(() => showToast('Copiez le lien manuellement'));
 
 // ══════════════════════════════════════════════
+// HEARTBEAT
+// ══════════════════════════════════════════════
+function startHeartbeat() {
+  // L'hôte envoie son signe de vie toutes les 10 secondes
+  clearInterval(G.heartbeatIv);
+  G.heartbeatIv = setInterval(async () => {
+    if(!G.gameId || !G.isHost) { clearInterval(G.heartbeatIv); return; }
+    try { await dbUpd(G.gameId, { hostHeartbeat: Date.now() }); } catch(e) {}
+  }, 10000);
+  // Arrêter le heartbeat si l'hôte ferme la page
+  window.addEventListener('beforeunload', stopHeartbeat);
+}
+
+function stopHeartbeat() {
+  clearInterval(G.heartbeatIv);
+}
+
+// Les joueurs surveillent le heartbeat toutes les 15s
+function startHostWatcher() {
+  clearInterval(G.hostWatcherIv);
+  G.hostWatcherIv = setInterval(async () => {
+    if(!G.gameId) { clearInterval(G.hostWatcherIv); return; }
+    const cur = document.querySelector('.screen.active')?.id;
+    // Pas besoin de surveiller si la partie est en cours (résultats, etc.)
+    if(cur === 'results-screen' || cur === 'cancelled-screen' || cur === 'kicked-screen') {
+      clearInterval(G.hostWatcherIv); return;
+    }
+    try {
+      const data = await dbGet(G.gameId);
+      if(!data || data.phase === 'cancelled') {
+        clearInterval(G.hostWatcherIv);
+        clearInterval(G.timerIv);
+        if(G.unsub) G.unsub();
+        showScreen('cancelled-screen');
+        return;
+      }
+      // En lobby ou wait : vérifier que l'hôte est vivant
+      if((cur === 'wait-screen' || cur === 'lobby-screen') && !isHostAlive(data)) {
+        clearInterval(G.hostWatcherIv);
+        clearInterval(G.timerIv);
+        if(G.unsub) G.unsub();
+        showScreen('cancelled-screen');
+      }
+    } catch(e) {}
+  }, 15000);
+}
+
+function isHostAlive(data) {
+  if(!data?.hostHeartbeat) return false;
+  return (Date.now() - data.hostHeartbeat) < 25000; // 25s de tolérance
+}
+
+// ══════════════════════════════════════════════
 // JOIN
 // ══════════════════════════════════════════════
 async function checkJoin() {
@@ -205,13 +259,17 @@ async function checkJoin() {
   G.gameId = gid;
   const stored = sessionStorage.getItem('pb_id_' + gid);
   const data = await dbGet(gid);
-  if(!data) { showToast('Partie introuvable !'); return false; }
+  if(!data) { showScreen('cancelled-screen'); return true; }
+  // Vérifier que l'hôte est actif (sauf si la partie est en cours)
+  if(data.phase === 'lobby' && !isHostAlive(data)) { showScreen('cancelled-screen'); return true; }
+  if(data.phase === 'cancelled') { showScreen('cancelled-screen'); return true; }
   G.config = data.config;
   if(stored && data.players?.[stored]) {
     G.myId = stored; G.isHost = data.players[stored].isHost || false;
     showScreen('wait-screen');
     document.getElementById('wait-pseudo-display').textContent = data.players[stored].pseudo;
     startListener();
+    startHostWatcher();
     return true;
   }
   showScreen('join-screen');
@@ -222,6 +280,8 @@ window.joinGame = async () => {
   const p = document.getElementById('join-pseudo').value.trim();
   if(!p) { showToast('Entrez un pseudo !'); return; }
   const data = await dbGet(G.gameId);
+  if(!data || data.phase === 'cancelled') { showScreen('cancelled-screen'); return; }
+  if(!isHostAlive(data)) { showScreen('cancelled-screen'); return; }
   const players = Object.values(data.players || {});
   if(players.find(x => x.pseudo === p)) { showToast('Pseudo déjà pris !'); return; }
   const id = 'p_' + Math.random().toString(36).slice(2,6);
@@ -234,6 +294,7 @@ window.joinGame = async () => {
   document.getElementById('wait-pseudo-display').textContent = p;
   showScreen('wait-screen');
   startListener();
+  startHostWatcher();
 };
 
 // ══════════════════════════════════════════════
@@ -246,6 +307,19 @@ function startListener() {
     G.config = data.config;
     const cur   = document.querySelector('.screen.active')?.id;
     const phase = data.phase;
+    if(phase === 'cancelled') {
+      clearInterval(G.timerIv);
+      if(G.unsub) G.unsub();
+      showScreen('cancelled-screen');
+      return;
+    }
+    // Joueur expulsé
+    if(!G.isHost && data.players && !data.players[G.myId]) {
+      clearInterval(G.timerIv);
+      if(G.unsub) G.unsub();
+      showScreen('kicked-screen');
+      return;
+    }
     if(phase === 'lobby') {
       const pls = Object.values(data.players || {});
       renderPlayerList(pls, G.config.nbPlayers);
@@ -283,7 +357,10 @@ function renderPlayerList(pls, max) {
   document.getElementById('player-count').textContent = `${pls.length} / ${max}`;
   pls.forEach(p => {
     const it = document.createElement('div'); it.className = 'player-item';
-    it.innerHTML = `<div class="player-avatar" style="background:${p.avatar}">${p.pseudo[0].toUpperCase()}</div><div class="player-name">${p.pseudo}</div>${p.isHost ? '<span class="player-badge">🎮 Hôte</span>' : '<span class="player-badge">✓ Prêt</span>'}`;
+    const kickBtn = (!p.isHost && G.isHost)
+      ? `<button class="btn btn-secondary btn-sm" style="margin-left:auto;color:var(--accent);border-color:var(--accent)" onclick="kickPlayer('${p.id}')">Expulser</button>`
+      : (p.isHost ? '<span class="player-badge">🎮 Hôte</span>' : '<span class="player-badge" style="margin-left:auto">✓ Prêt</span>');
+    it.innerHTML = `<div class="player-avatar" style="background:${p.avatar}">${p.pseudo[0].toUpperCase()}</div><div class="player-name">${p.pseudo}</div>${kickBtn}`;
     list.appendChild(it);
   });
 }
@@ -490,6 +567,34 @@ window.restartGame = async () => {
   renderPlayerList(pls, G.config.nbPlayers);
 };
 window.newGame = () => location.href = location.pathname;
+
+// Quitter le lobby et revenir à la config (hôte uniquement)
+window.cancelGame = async () => {
+  if(!G.isHost) return;
+  if(!confirm('Annuler la partie et revenir à la configuration ?')) return;
+  await dbUpd(G.gameId, { phase:'cancelled' });
+  if(G.unsub) G.unsub();
+  clearInterval(G.timerIv);
+  clearInterval(G.heartbeatIv);
+  clearInterval(G.hostWatcherIv);
+  window.removeEventListener('beforeunload', stopHeartbeat);
+  G.gameId = null; G.myId = null; G.isHost = false;
+  showScreen('setup-screen');
+};
+
+// Virer un joueur (hôte uniquement)
+window.kickPlayer = async (playerId) => {
+  if(!G.isHost) return;
+  const data = await dbGet(G.gameId);
+  const pseudo = data.players?.[playerId]?.pseudo || 'ce joueur';
+  if(!confirm(`Expulser ${pseudo} de la partie ?`)) return;
+  // Supprimer le joueur des players et totalPoints
+  await dbUpd(G.gameId, {
+    [`players/${playerId}`]: null,
+    [`totalPoints/${playerId}`]: null
+  });
+  showToast(`${pseudo} a été expulsé.`);
+};
 
 // ══════════════════════════════════════════════
 // UTILS
@@ -698,9 +803,30 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(23
       <div class="section-title"><span class="dot"></span>Joueurs connectés <span id="player-count" style="font-size:1rem;color:var(--muted);margin-left:6px">0 / ?</span></div>
       <div class="player-list" id="player-list"></div>
     </div>
-    <div class="flex-row" style="justify-content:flex-end">
+    <div class="flex-row" style="justify-content:space-between">
+      <button class="btn btn-secondary" onclick="cancelGame()" style="color:var(--accent);border-color:var(--accent)">✕ Annuler la partie</button>
       <button class="btn btn-primary btn-lg" onclick="startGame()">Lancer la partie ▶</button>
     </div>
+  </div>
+</div>
+
+<!-- CANCELLED -->
+<div class="screen" id="cancelled-screen">
+  <div class="site-header"><div class="logo">Petit <span>Bac</span></div></div>
+  <div style="max-width:460px;width:100%;padding:60px 20px;text-align:center;display:flex;flex-direction:column;gap:20px;align-items:center">
+    <div style="font-size:3rem">😕</div>
+    <div class="section-title" style="justify-content:center">Partie annulée</div>
+    <p class="text-muted">L'hôte a annulé la partie. Demandez-lui un nouveau lien pour rejoindre une prochaine partie.</p>
+  </div>
+</div>
+
+<!-- KICKED -->
+<div class="screen" id="kicked-screen">
+  <div class="site-header"><div class="logo">Petit <span>Bac</span></div></div>
+  <div style="max-width:460px;width:100%;padding:60px 20px;text-align:center;display:flex;flex-direction:column;gap:20px;align-items:center">
+    <div style="font-size:3rem">🚫</div>
+    <div class="section-title" style="justify-content:center">Vous avez été expulsé</div>
+    <p class="text-muted">L'hôte vous a retiré de la partie. Demandez-lui un nouveau lien si c'est une erreur.</p>
   </div>
 </div>
 
