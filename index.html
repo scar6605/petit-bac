@@ -302,7 +302,7 @@ window.joinGame = async () => {
 // ══════════════════════════════════════════════
 function startListener() {
   if(G.unsub) G.unsub();
-  G.unsub = dbWatch(G.gameId, data => {
+  G.unsub = dbWatch(G.gameId, async data => {
     if(!data) return;
     G.config = data.config;
     const cur   = document.querySelector('.screen.active')?.id;
