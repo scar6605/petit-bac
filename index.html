@@ -360,6 +360,7 @@ function startListener() {
       document.getElementById('game-status').textContent = `${stopped.length} / ${pls.length} joueurs ont fini...`;
       return;
     }
+    if(phase === 'review' && cur !== 'review-screen') {
       clearInterval(G.timerIv);
       showStopOverlay('Manche terminée !', () => { showScreen('review-screen'); renderReview(data); });
       return;
