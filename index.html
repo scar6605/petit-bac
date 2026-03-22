@@ -4,6 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Petit Bac !</title>
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#8A3A29">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Petit Bac">
+<link rel="apple-touch-icon" href="icon-192.png">
+
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 
 <script type="module">
@@ -37,7 +46,7 @@ const dbGet  = async (id)    => (await get(gRef(id))).val();
 const dbWatch= (id, cb)      => onValue(gRef(id), s => cb(s.val()));
 
 const ABC     = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
-const COLORS  = ['#e63946','#457b9d','#2a9d8f','#f4a261','#6d6875','#e9c46a','#264653','#e76f51'];
+const COLORS  = ['#8A3A29','#457b9d','#2a9d8f','#f4a261','#6d6875','#e9c46a','#264653','#e76f51'];
 const DEF_TH  = ['Prénom','Ville','Animal','Objet','Métier'];
 const DEF_EX  = ['W','X','Y'];
 const sk      = s => s.replace(/\s/g,'__').replace(/[.#$\/\[\]]/g,'--');
@@ -56,21 +65,19 @@ let gameMode  = 'timer';
 const PREFS_KEY = 'petitbac_prefs';
 
 function loadPrefs() {
-  try {
-    const raw = localStorage.getItem(PREFS_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch(e) { return null; }
+  try { const raw = localStorage.getItem(PREFS_KEY); return raw ? JSON.parse(raw) : null; }
+  catch(e) { return null; }
 }
 
 function savePrefs() {
   try {
     const prefs = {
-      nbPlayers:     +document.getElementById('nb-players').value || 4,
-      nbRounds:      +document.getElementById('nb-rounds').value  || 5,
-      timerDuration: +document.getElementById('timer-duration').value || 90,
-      mode:          gameMode,
-      themes:        [...themes],
-      excludedLetters: [...exLetters]
+      nbPlayers:      +document.getElementById('nb-players').value || 4,
+      nbRounds:       +document.getElementById('nb-rounds').value  || 5,
+      timerDuration:  +document.getElementById('timer-duration').value || 90,
+      mode:           gameMode,
+      themes:         [...themes],
+      excludedLetters:[...exLetters]
     };
     localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
   } catch(e) {}
@@ -80,24 +87,19 @@ function savePrefs() {
 // SETUP
 // ══════════════════════════════════════════════
 function initSetup() {
-  const prefs = loadPrefs();
-
-  // Appliquer les préférences sauvegardées ou les valeurs par défaut
-  const savedEx     = prefs?.excludedLetters ?? DEF_EX;
-  const savedThemes = prefs?.themes          ?? DEF_TH;
-  const savedMode   = prefs?.mode            ?? 'timer';
-  const savedNbP    = prefs?.nbPlayers       ?? 4;
-  const savedNbR    = prefs?.nbRounds        ?? 5;
-  const savedTimer  = prefs?.timerDuration   ?? 90;
+  const prefs     = loadPrefs();
+  const savedEx   = prefs?.excludedLetters ?? DEF_EX;
+  const savedTh   = prefs?.themes          ?? DEF_TH;
+  const savedMode = prefs?.mode            ?? 'timer';
+  const savedNbP  = prefs?.nbPlayers       ?? 4;
+  const savedNbR  = prefs?.nbRounds        ?? 5;
+  const savedTimer= prefs?.timerDuration   ?? 90;
 
   exLetters = new Set(savedEx);
+  document.getElementById('nb-players').value     = savedNbP;
+  document.getElementById('nb-rounds').value      = savedNbR;
+  document.getElementById('timer-duration').value = savedTimer;
 
-  // Champs numériques
-  document.getElementById('nb-players').value      = savedNbP;
-  document.getElementById('nb-rounds').value       = savedNbR;
-  document.getElementById('timer-duration').value  = savedTimer;
-
-  // Grille de lettres
   const grid = document.getElementById('letters-grid');
   ABC.forEach(l => {
     const b = document.createElement('div');
@@ -111,23 +113,18 @@ function initSetup() {
     grid.appendChild(b);
   });
 
-  // Thèmes
-  savedThemes.forEach(addThemeChip);
-  themes = [...savedThemes];
+  savedTh.forEach(addThemeChip);
+  themes = [...savedTh];
 
-  // Mode de jeu
   gameMode = savedMode;
   document.querySelectorAll('#mode-group .radio-option').forEach(el => {
-    if(el.dataset.mode === savedMode) el.classList.add('selected');
-    else el.classList.remove('selected');
+    el.classList.toggle('selected', el.dataset.mode === savedMode);
   });
   document.getElementById('timer-options').style.display = savedMode === 'timer' ? 'block' : 'none';
 
-  // Sauvegarder à chaque changement des champs numériques
-  ['nb-players','nb-rounds','timer-duration'].forEach(id => {
-    document.getElementById(id).addEventListener('change', savePrefs);
-  });
-
+  ['nb-players','nb-rounds','timer-duration'].forEach(id =>
+    document.getElementById(id).addEventListener('change', savePrefs)
+  );
   document.getElementById('theme-input').addEventListener('keydown', e => e.key === 'Enter' && addTheme());
 }
 
@@ -143,11 +140,7 @@ function addThemeChip(v) {
   const list = document.getElementById('themes-list');
   const c = document.createElement('div'); c.className = 'chip'; c.dataset.theme = v;
   c.innerHTML = `${v}<span class="remove" data-v="${v}">×</span>`;
-  c.querySelector('.remove').onclick = () => {
-    themes = themes.filter(t => t !== v);
-    c.remove();
-    savePrefs();
-  };
+  c.querySelector('.remove').onclick = () => { themes = themes.filter(t => t !== v); c.remove(); savePrefs(); };
   list.appendChild(c);
 }
 
@@ -160,7 +153,7 @@ window.selectMode = el => {
 };
 
 // ══════════════════════════════════════════════
-// CREATE GAME (host)
+// CREATE GAME
 // ══════════════════════════════════════════════
 window.createGame = async () => {
   if(!db) { showToast('⚠️ Firebase non configuré !'); return; }
@@ -201,45 +194,30 @@ window.copyLink = () => navigator.clipboard.writeText(document.getElementById('i
 // HEARTBEAT
 // ══════════════════════════════════════════════
 function startHeartbeat() {
-  // L'hôte envoie son signe de vie toutes les 10 secondes
   clearInterval(G.heartbeatIv);
   G.heartbeatIv = setInterval(async () => {
     if(!G.gameId || !G.isHost) { clearInterval(G.heartbeatIv); return; }
     try { await dbUpd(G.gameId, { hostHeartbeat: Date.now() }); } catch(e) {}
   }, 10000);
-  // Arrêter le heartbeat si l'hôte ferme la page
   window.addEventListener('beforeunload', stopHeartbeat);
 }
+function stopHeartbeat() { clearInterval(G.heartbeatIv); }
 
-function stopHeartbeat() {
-  clearInterval(G.heartbeatIv);
-}
-
-// Les joueurs surveillent le heartbeat toutes les 15s
 function startHostWatcher() {
   clearInterval(G.hostWatcherIv);
   G.hostWatcherIv = setInterval(async () => {
     if(!G.gameId) { clearInterval(G.hostWatcherIv); return; }
     const cur = document.querySelector('.screen.active')?.id;
-    // Pas besoin de surveiller si la partie est en cours (résultats, etc.)
-    if(cur === 'results-screen' || cur === 'cancelled-screen' || cur === 'kicked-screen') {
-      clearInterval(G.hostWatcherIv); return;
-    }
+    if(['results-screen','cancelled-screen','kicked-screen'].includes(cur)) { clearInterval(G.hostWatcherIv); return; }
     try {
       const data = await dbGet(G.gameId);
       if(!data || data.phase === 'cancelled') {
-        clearInterval(G.hostWatcherIv);
-        clearInterval(G.timerIv);
-        if(G.unsub) G.unsub();
-        showScreen('cancelled-screen');
-        return;
+        clearInterval(G.hostWatcherIv); clearInterval(G.timerIv);
+        if(G.unsub) G.unsub(); showScreen('cancelled-screen'); return;
       }
-      // En lobby ou wait : vérifier que l'hôte est vivant
-      if((cur === 'wait-screen' || cur === 'lobby-screen') && !isHostAlive(data)) {
-        clearInterval(G.hostWatcherIv);
-        clearInterval(G.timerIv);
-        if(G.unsub) G.unsub();
-        showScreen('cancelled-screen');
+      if(['wait-screen','lobby-screen'].includes(cur) && !isHostAlive(data)) {
+        clearInterval(G.hostWatcherIv); clearInterval(G.timerIv);
+        if(G.unsub) G.unsub(); showScreen('cancelled-screen');
       }
     } catch(e) {}
   }, 15000);
@@ -247,7 +225,7 @@ function startHostWatcher() {
 
 function isHostAlive(data) {
   if(!data?.hostHeartbeat) return false;
-  return (Date.now() - data.hostHeartbeat) < 25000; // 25s de tolérance
+  return (Date.now() - data.hostHeartbeat) < 25000;
 }
 
 // ══════════════════════════════════════════════
@@ -260,7 +238,6 @@ async function checkJoin() {
   const stored = sessionStorage.getItem('pb_id_' + gid);
   const data = await dbGet(gid);
   if(!data) { showScreen('cancelled-screen'); return true; }
-  // Vérifier que l'hôte est actif (sauf si la partie est en cours)
   if(data.phase === 'lobby' && !isHostAlive(data)) { showScreen('cancelled-screen'); return true; }
   if(data.phase === 'cancelled') { showScreen('cancelled-screen'); return true; }
   G.config = data.config;
@@ -268,12 +245,9 @@ async function checkJoin() {
     G.myId = stored; G.isHost = data.players[stored].isHost || false;
     showScreen('wait-screen');
     document.getElementById('wait-pseudo-display').textContent = data.players[stored].pseudo;
-    startListener();
-    startHostWatcher();
-    return true;
+    startListener(); startHostWatcher(); return true;
   }
-  showScreen('join-screen');
-  return true;
+  showScreen('join-screen'); return true;
 }
 
 window.joinGame = async () => {
@@ -292,9 +266,7 @@ window.joinGame = async () => {
   await update(fRef(G.gameId,'players'), { [id]:{ id, pseudo:p, avatar, isHost:false } });
   await update(fRef(G.gameId,'totalPoints'), { [id]:0 });
   document.getElementById('wait-pseudo-display').textContent = p;
-  showScreen('wait-screen');
-  startListener();
-  startHostWatcher();
+  showScreen('wait-screen'); startListener(); startHostWatcher();
 };
 
 // ══════════════════════════════════════════════
@@ -308,53 +280,33 @@ function startListener() {
     const cur   = document.querySelector('.screen.active')?.id;
     const phase = data.phase;
     if(phase === 'cancelled') {
-      clearInterval(G.timerIv);
-      if(G.unsub) G.unsub();
-      showScreen('cancelled-screen');
-      return;
+      clearInterval(G.timerIv); if(G.unsub) G.unsub(); showScreen('cancelled-screen'); return;
     }
-    // Joueur expulsé
     if(!G.isHost && data.players && !data.players[G.myId]) {
-      clearInterval(G.timerIv);
-      if(G.unsub) G.unsub();
-      showScreen('kicked-screen');
-      return;
+      clearInterval(G.timerIv); if(G.unsub) G.unsub(); showScreen('kicked-screen'); return;
     }
     if(phase === 'lobby') {
-      const pls = Object.values(data.players || {});
-      renderPlayerList(pls, G.config.nbPlayers);
-      return;
+      renderPlayerList(Object.values(data.players || {}), G.config.nbPlayers); return;
     }
     if(phase === 'game' && cur !== 'game-screen') {
-      clearInterval(G.timerIv);
-      showScreen('game-screen');
-      renderGameScreen(data);
-      startTimer(data);
-      return;
+      clearInterval(G.timerIv); showScreen('game-screen'); renderGameScreen(data); startTimer(data); return;
     }
     if(phase === 'game' && G.isHost && data.stoppedBy) {
       clearInterval(G.timerIv);
       const who = data.players?.[data.stoppedBy]?.pseudo || 'Un joueur';
-      // Sauvegarder les réponses de l'hôte AVANT de passer en review
       await saveMyAnswers(data.currentRound);
-      await endRound(data.currentRound, `${who} a dit STOP !`);
-      return;
+      await endRound(data.currentRound, `${who} a dit STOP !`); return;
     }
-    // Stop individuel : vérifier si tous les joueurs ont fini
     if(phase === 'game' && G.isHost && G.config?.mode === 'stop-individual' && data.stoppedPlayers) {
       const pls = Object.keys(data.players || {});
       const stopped = Object.keys(data.stoppedPlayers);
       if(pls.length > 0 && pls.every(id => stopped.includes(id))) {
         clearInterval(G.timerIv);
         await saveMyAnswers(data.currentRound);
-        await endRound(data.currentRound, 'Tout le monde a fini !');
-        return;
+        await endRound(data.currentRound, 'Tout le monde a fini !'); return;
       }
-      // Afficher combien de joueurs ont fini
-      const cur = document.querySelector('.screen.active')?.id;
-      if(cur === 'game-screen') {
+      if(cur === 'game-screen')
         document.getElementById('game-status').textContent = `${stopped.length} / ${pls.length} joueurs ont fini...`;
-      }
       return;
     }
     if(phase === 'game' && cur === 'game-screen' && !G.isHost && G.config?.mode === 'stop-individual' && data.stoppedPlayers) {
@@ -365,14 +317,10 @@ function startListener() {
     }
     if(phase === 'review' && cur !== 'review-screen') {
       clearInterval(G.timerIv);
-      showStopOverlay('Manche terminée !', () => { showScreen('review-screen'); renderReview(data); });
-      return;
+      showStopOverlay('Manche terminée !', () => { showScreen('review-screen'); renderReview(data); }); return;
     }
     if(phase === 'review' && cur === 'review-screen') { renderReview(data); return; }
-    if(phase === 'results' && cur !== 'results-screen') {
-      clearInterval(G.timerIv);
-      showResults(data);
-    }
+    if(phase === 'results' && cur !== 'results-screen') { clearInterval(G.timerIv); showResults(data); }
   });
 }
 
@@ -391,7 +339,7 @@ function renderPlayerList(pls, max) {
 }
 
 // ══════════════════════════════════════════════
-// HOST: start game
+// HOST: start / round
 // ══════════════════════════════════════════════
 window.startGame = async () => {
   const data = await dbGet(G.gameId);
@@ -402,10 +350,10 @@ window.startGame = async () => {
 };
 
 async function launchRound(data, roundIdx) {
-  const used  = data.roundsData ? Object.values(data.roundsData).map(r => r.letter) : [];
-  const avail = G.config.activeLetters.filter(l => !used.includes(l));
+  const used   = data.roundsData ? Object.values(data.roundsData).map(r => r.letter) : [];
+  const avail  = G.config.activeLetters.filter(l => !used.includes(l));
   const letter = avail[Math.floor(Math.random() * avail.length)];
-  const pls = Object.values(data.players || {});
+  const pls    = Object.values(data.players || {});
   const answers = {}, points = {};
   pls.forEach(p => {
     answers[p.id] = {}; points[p.id] = {};
@@ -421,7 +369,6 @@ async function launchRound(data, roundIdx) {
 // GAME SCREEN
 // ══════════════════════════════════════════════
 let autoSaveTimeout = null;
-
 function scheduleAutoSave(roundIdx) {
   clearTimeout(autoSaveTimeout);
   autoSaveTimeout = setTimeout(() => saveMyAnswers(roundIdx), 600);
@@ -434,14 +381,13 @@ function renderGameScreen(data) {
   const form = document.getElementById('categories-form'); form.innerHTML = '';
   G.config.themes.forEach(t => {
     const row = document.createElement('div'); row.className = 'category-row';
-    row.innerHTML = `<div class="cat-label">${t}</div><input class="cat-input" type="text" id="cat-${sk(t)}" placeholder="${t} en ${data.currentLetter}...">`;
-    // Sauvegarde automatique à chaque frappe
+    row.innerHTML = `<div class="cat-label">${t}</div><input class="cat-input" type="text" id="cat-${sk(t)}" placeholder="${t} en ${data.currentLetter}..." autocomplete="off" autocorrect="off" autocapitalize="words">`;
     row.querySelector('input').addEventListener('input', () => scheduleAutoSave(data.currentRound));
     form.appendChild(row);
   });
   const timerEl = document.getElementById('timer-display'), stopBtn = document.getElementById('stop-btn'), prog = document.getElementById('progress-area');
   if(G.config.mode === 'timer') { timerEl.style.display='block'; stopBtn.style.display='none'; prog.style.display='block'; }
-  else { timerEl.style.display='none'; prog.style.display='none'; stopBtn.style.display='block'; stopBtn.disabled=false; stopBtn.textContent=G.config.mode==='stop-individual' ? "J'ai fini !" : 'STOP !'; }
+  else { timerEl.style.display='none'; prog.style.display='none'; stopBtn.style.display='block'; stopBtn.disabled=false; stopBtn.textContent=G.config.mode==='stop-individual'?"J'ai fini !":'STOP !'; }
 }
 
 function startTimer(data) {
@@ -483,9 +429,7 @@ window.playerStop = async () => {
   const data = await dbGet(G.gameId);
   await saveMyAnswers(data.currentRound);
   const mode = G.config.mode;
-
   if(mode === 'first-stop') {
-    // Le 1er qui appuie stoppe tout le monde
     clearInterval(G.timerIv);
     if(G.isHost) await endRound(data.currentRound, 'STOP !');
     else {
@@ -494,13 +438,10 @@ window.playerStop = async () => {
       document.getElementById('stop-btn').textContent = '✓ En attente...';
     }
   } else {
-    // Stop individuel : enregistrer que ce joueur a fini
     document.getElementById('stop-btn').disabled = true;
     document.getElementById('stop-btn').textContent = '✓ En attente...';
     document.getElementById('game-status').textContent = 'En attente des autres joueurs...';
-    // Ajouter ce joueur dans stoppedPlayers
     await dbUpd(G.gameId, { [`stoppedPlayers/${G.myId}`]: true });
-    // L'hôte vérifie si tout le monde a fini (géré dans le listener)
   }
 };
 
@@ -530,7 +471,7 @@ function renderReview(data) {
       row.innerHTML = `
         <div style="width:28px;height:28px;border-radius:50%;background:${p.avatar};display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:0.8rem;flex-shrink:0">${p.pseudo[0].toUpperCase()}</div>
         <div class="review-player">${p.pseudo}</div>
-        <div class="review-text ${val ? '' : 'empty'}">${val || '— aucune réponse —'}</div>
+        <div class="review-text ${val?'':'empty'}">${val||'— aucune réponse —'}</div>
         <div class="point-toggle">
           <div class="pt-btn ${dp===1?'active-1':''}" data-pid="${p.id}" data-key="${sk(t)}" data-ri="${ri}" data-v="1">✓</div>
           <div class="pt-btn ${dp===0?'active-0':''}" data-pid="${p.id}" data-key="${sk(t)}" data-ri="${ri}" data-v="0">✗</div>
@@ -554,38 +495,26 @@ function renderReview(data) {
 }
 
 window.validateReview = async () => {
-  const data  = await dbGet(G.gameId);
-  const ri    = data.currentRound, round = data.roundsData?.[ri] || {};
-  const pls   = Object.values(data.players || {});
-
-  // 1. D'abord pousser tous les points "auto" (-1) vers Firebase
-  //    (les réponses non touchées par l'hôte ont encore -1 dans Firebase)
+  const data = await dbGet(G.gameId);
+  const ri   = data.currentRound, round = data.roundsData?.[ri] || {};
+  const pls  = Object.values(data.players || {});
   const pointsUpd = {};
   pls.forEach(p => {
     G.config.themes.forEach(t => {
       const stored = round.points?.[p.id]?.[sk(t)];
       if(stored === -1 || stored === undefined) {
-        const val = round.answers?.[p.id]?.[sk(t)] || '';
-        const auto = val ? 1 : 0;
-        pointsUpd[`roundsData/${ri}/points/${p.id}/${sk(t)}`] = auto;
+        pointsUpd[`roundsData/${ri}/points/${p.id}/${sk(t)}`] = (round.answers?.[p.id]?.[sk(t)] || '') ? 1 : 0;
       }
     });
   });
   if(Object.keys(pointsUpd).length > 0) await dbUpd(G.gameId, pointsUpd);
-
-  // 2. Relire les données fraiches avec tous les points à jour
   const fresh = await dbGet(G.gameId);
   const freshRound = fresh.roundsData?.[ri] || {};
   const tots = { ...(fresh.totalPoints || {}) };
-
-  // 3. Additionner uniquement les points === 1
   pls.forEach(p => {
     if(!tots[p.id]) tots[p.id] = 0;
-    G.config.themes.forEach(t => {
-      if(freshRound.points?.[p.id]?.[sk(t)] === 1) tots[p.id]++;
-    });
+    G.config.themes.forEach(t => { if(freshRound.points?.[p.id]?.[sk(t)] === 1) tots[p.id]++; });
   });
-
   const next = ri + 1;
   if(next >= G.config.nbRounds) {
     await dbUpd(G.gameId, { totalPoints:tots, phase:'results', currentRound:next });
@@ -632,31 +561,23 @@ window.restartGame = async () => {
 };
 window.newGame = () => location.href = location.pathname;
 
-// Quitter le lobby et revenir à la config (hôte uniquement)
 window.cancelGame = async () => {
   if(!G.isHost) return;
   if(!confirm('Annuler la partie et revenir à la configuration ?')) return;
   await dbUpd(G.gameId, { phase:'cancelled' });
   if(G.unsub) G.unsub();
-  clearInterval(G.timerIv);
-  clearInterval(G.heartbeatIv);
-  clearInterval(G.hostWatcherIv);
+  clearInterval(G.timerIv); clearInterval(G.heartbeatIv); clearInterval(G.hostWatcherIv);
   window.removeEventListener('beforeunload', stopHeartbeat);
   G.gameId = null; G.myId = null; G.isHost = false;
   showScreen('setup-screen');
 };
 
-// Virer un joueur (hôte uniquement)
 window.kickPlayer = async (playerId) => {
   if(!G.isHost) return;
   const data = await dbGet(G.gameId);
   const pseudo = data.players?.[playerId]?.pseudo || 'ce joueur';
   if(!confirm(`Expulser ${pseudo} de la partie ?`)) return;
-  // Supprimer le joueur des players et totalPoints
-  await dbUpd(G.gameId, {
-    [`players/${playerId}`]: null,
-    [`totalPoints/${playerId}`]: null
-  });
+  await dbUpd(G.gameId, { [`players/${playerId}`]: null, [`totalPoints/${playerId}`]: null });
   showToast(`${pseudo} a été expulsé.`);
 };
 
@@ -666,7 +587,7 @@ window.kickPlayer = async (playerId) => {
 window.showScreen      = id  => { document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); document.getElementById(id).classList.add('active'); scrollTo(0,0); };
 window.showToast       = msg => { const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2800); };
 window.showStopOverlay = (msg,cb) => { const ov=document.getElementById('stop-overlay'); document.getElementById('stop-message').textContent=msg; ov.classList.add('show'); setTimeout(()=>{ ov.classList.remove('show'); cb&&cb(); },1800); };
-window.addTheme        = addTheme;
+window.addTheme = addTheme;
 
 // ══════════════════════════════════════════════
 // INIT
@@ -679,51 +600,84 @@ document.addEventListener('DOMContentLoaded', async () => {
 </script>
 
 <style>
-:root{--ink:#0f0f0f;--paper:#f5f0e8;--cream:#ede8dc;--accent:#e63946;--accent2:#457b9d;--gold:#f4a261;--green:#2a9d8f;--light:#ffffff;--muted:#888;--border:#d4cfc4;--shadow:0 4px 24px rgba(0,0,0,.10);--radius:16px;--font-display:'Playfair Display',serif;--font-body:'DM Sans',sans-serif}
+/* ══ COULEURS — modifier uniquement ces 2 lignes pour changer le thème ══ */
+:root {
+  --ink:    #8A3A29;   /* couleur principale (marron) */
+  --paper:  #D1B799;   /* couleur de fond (beige) */
+
+  /* dérivées — s'adaptent automatiquement */
+  --cream:  #C9A870;
+  --border: #B8966A;
+  --light:  #FDF6EC;
+  --muted:  #9A7A60;
+
+  /* couleurs fixes */
+  --accent:  #8A3A29;
+  --accent2: #6B7A4A;
+  --gold:    #C8862A;
+  --green:   #2a9d8f;
+  --shadow:  0 4px 24px rgba(138,58,41,.12);
+  --radius:  16px;
+  --font-display: 'Playfair Display', serif;
+  --font-body:    'DM Sans', sans-serif;
+}
+
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--paper);color:var(--ink);font-family:var(--font-body);min-height:100vh;overflow-x:hidden}
-.bg-dots{position:fixed;inset:0;z-index:0;pointer-events:none;background-image:radial-gradient(circle,#c9bfaf 1px,transparent 1px);background-size:28px 28px;opacity:.35}
+
+/* ── fond pointillés ── */
+.bg-dots{position:fixed;inset:0;z-index:0;pointer-events:none;background-image:radial-gradient(circle,rgba(138,58,41,.18) 1px,transparent 1px);background-size:28px 28px}
+
 .screen{display:none;min-height:100vh;position:relative;z-index:1}
 .screen.active{display:flex;flex-direction:column;align-items:center}
-.site-header{width:100%;padding:24px 40px 16px;display:flex;align-items:center;gap:16px;border-bottom:2px solid var(--border);background:var(--paper);position:sticky;top:0;z-index:100}
-.logo{font-family:var(--font-display);font-size:2rem;font-weight:900;color:var(--ink);letter-spacing:-1px}
-.logo span{color:var(--accent)}
-.header-sub{font-size:.8rem;color:var(--muted);letter-spacing:2px;text-transform:uppercase;margin-left:auto}
+
+/* ── header avec logo SVG ── */
+.site-header{width:100%;padding:16px 32px;display:flex;align-items:center;gap:14px;border-bottom:2px solid var(--border);background:var(--paper);position:sticky;top:0;z-index:100}
+.logo-svg{width:44px;height:44px;flex-shrink:0}
+.logo-text{font-family:var(--font-display);font-size:1.7rem;font-weight:900;color:var(--ink);letter-spacing:-1px;line-height:1}
+.header-sub{font-size:.75rem;color:var(--muted);letter-spacing:2px;text-transform:uppercase;margin-left:auto}
+
 .card{background:var(--light);border:2px solid var(--border);border-radius:var(--radius);padding:32px;box-shadow:var(--shadow)}
 .section-title{font-family:var(--font-display);font-size:1.5rem;margin-bottom:20px;color:var(--ink);display:flex;align-items:center;gap:10px}
-.section-title .dot{width:10px;height:10px;border-radius:50%;background:var(--accent);display:inline-block}
+.section-title .dot{width:10px;height:10px;border-radius:50%;background:var(--ink);display:inline-block}
 label{font-size:.85rem;font-weight:600;color:var(--ink);letter-spacing:.5px;display:block;margin-bottom:6px}
-input[type=text],input[type=number],select{width:100%;padding:12px 16px;border:2px solid var(--border);border-radius:10px;font-family:var(--font-body);font-size:.95rem;background:var(--paper);color:var(--ink);transition:border-color .2s,box-shadow .2s;outline:none}
-input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(230,57,70,.12)}
+input[type=text],input[type=number],select{width:100%;padding:12px 16px;border:2px solid var(--border);border-radius:10px;font-family:var(--font-body);font-size:.95rem;background:var(--light);color:var(--ink);transition:border-color .2s,box-shadow .2s;outline:none}
+input:focus,select:focus{border-color:var(--ink);box-shadow:0 0 0 3px rgba(138,58,41,.15)}
 .form-group{margin-bottom:20px}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:700px){.form-row{grid-template-columns:1fr}}
+
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:13px 28px;border:2px solid var(--ink);border-radius:10px;font-family:var(--font-body);font-size:.95rem;font-weight:600;cursor:pointer;transition:all .15s;text-decoration:none;user-select:none;background:transparent}
 .btn-primary{background:var(--ink);color:var(--light)}
-.btn-primary:hover{background:var(--accent);border-color:var(--accent);transform:translateY(-1px);box-shadow:0 6px 20px rgba(230,57,70,.25)}
+.btn-primary:hover{filter:brightness(1.15);transform:translateY(-1px);box-shadow:0 6px 20px rgba(138,58,41,.3)}
 .btn-secondary{background:transparent;color:var(--ink)}
 .btn-secondary:hover{background:var(--cream)}
-.btn-accent{background:var(--accent);color:var(--light);border-color:var(--accent)}
-.btn-accent:hover{background:#c62333;border-color:#c62333;transform:translateY(-1px)}
+.btn-accent{background:var(--ink);color:var(--light);border-color:var(--ink)}
+.btn-accent:hover{filter:brightness(1.15);transform:translateY(-1px)}
 .btn-green{background:var(--green);color:var(--light);border-color:var(--green)}
 .btn-green:hover{background:#228b7e;border-color:#228b7e}
 .btn-sm{padding:8px 16px;font-size:.82rem}
 .btn-lg{padding:16px 40px;font-size:1.05rem}
 .btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+
 .chip-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
-.chip{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:var(--cream);border:1.5px solid var(--border);border-radius:999px;font-size:.82rem;font-weight:500}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:var(--cream);border:1.5px solid var(--border);border-radius:999px;font-size:.82rem;font-weight:500;color:var(--ink)}
 .chip .remove{cursor:pointer;color:var(--muted);font-size:1rem;line-height:1;transition:color .15s}
-.chip .remove:hover{color:var(--accent)}
+.chip .remove:hover{color:var(--ink)}
+
 .letters-grid{display:flex;flex-wrap:wrap;gap:6px}
-.letter-btn{width:38px;height:38px;border:2px solid var(--border);border-radius:8px;background:var(--paper);font-family:var(--font-display);font-size:1rem;font-weight:900;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center}
-.letter-btn:hover{border-color:var(--accent);color:var(--accent)}
-.letter-btn.excluded{background:var(--accent);border-color:var(--accent);color:var(--light)}
+.letter-btn{width:38px;height:38px;border:2px solid var(--border);border-radius:8px;background:var(--light);font-family:var(--font-display);font-size:1rem;font-weight:900;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;color:var(--ink)}
+.letter-btn:hover{border-color:var(--ink)}
+.letter-btn.excluded{background:var(--ink);border-color:var(--ink);color:var(--light)}
+
 .radio-group{display:flex;gap:10px;flex-wrap:wrap}
-.radio-option{flex:1;min-width:120px;padding:12px 16px;border:2px solid var(--border);border-radius:10px;cursor:pointer;text-align:center;font-size:.88rem;font-weight:500;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:6px}
-.radio-option:hover{border-color:var(--accent2)}
+.radio-option{flex:1;min-width:120px;padding:12px 16px;border:2px solid var(--border);border-radius:10px;cursor:pointer;text-align:center;font-size:.88rem;font-weight:500;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:6px;color:var(--ink)}
+.radio-option:hover{border-color:var(--ink)}
 .radio-option.selected{background:var(--ink);border-color:var(--ink);color:var(--light)}
+
 #setup-screen{padding-bottom:60px}
 .setup-container{width:100%;max-width:860px;padding:40px 20px;display:flex;flex-direction:column;gap:24px}
-@media(max-width:700px){.form-row{grid-template-columns:1fr}}
+
 #lobby-screen .lobby-container{max-width:600px;width:100%;padding:40px 20px;display:flex;flex-direction:column;gap:24px}
 .invite-box{background:var(--cream);border:2px dashed var(--border);border-radius:var(--radius);padding:20px 24px;text-align:center}
 .invite-url{font-size:.82rem;color:var(--muted);word-break:break-all;margin-bottom:12px}
@@ -732,24 +686,26 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(23
 .player-avatar{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.9rem;color:var(--light);flex-shrink:0}
 .player-name{font-weight:600}
 .player-badge{margin-left:auto;font-size:.75rem;color:var(--muted);background:var(--cream);padding:3px 10px;border-radius:999px;border:1.5px solid var(--border)}
+
 #join-screen .join-container{max-width:460px;width:100%;padding:40px 20px;display:flex;flex-direction:column;gap:24px;text-align:center}
-.join-hero{font-family:var(--font-display);font-size:3.5rem;font-weight:900;line-height:1}
-.join-hero span{color:var(--accent)}
+.join-hero{font-family:var(--font-display);font-size:3.5rem;font-weight:900;line-height:1;color:var(--ink)}
+
 #game-screen{background:var(--paper)}
 .game-top{width:100%;background:var(--light);border-bottom:2px solid var(--border);padding:16px 32px;display:flex;align-items:center;gap:20px;flex-wrap:wrap}
-.game-letter{font-family:var(--font-display);font-size:4rem;font-weight:900;color:var(--accent);line-height:1;min-width:60px;text-align:center}
+.game-letter{font-family:var(--font-display);font-size:4rem;font-weight:900;color:var(--ink);line-height:1;min-width:60px;text-align:center}
 .game-info{display:flex;flex-direction:column;gap:2px}
 .game-round{font-size:.8rem;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
 .game-status{font-size:1rem;font-weight:600}
 .timer-display{margin-left:auto;font-family:var(--font-display);font-size:2.2rem;font-weight:900;color:var(--ink);min-width:70px;text-align:right}
-.timer-display.danger{color:var(--accent);animation:pulse .8s infinite}
+.timer-display.danger{color:#c0392b;animation:pulse .8s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
 .game-body{width:100%;max-width:920px;padding:32px 20px;display:flex;flex-direction:column;gap:16px}
 .category-row{display:grid;grid-template-columns:180px 1fr;border:2px solid var(--border);border-radius:12px;overflow:hidden;background:var(--light);transition:border-color .2s}
-.category-row:focus-within{border-color:var(--accent)}
-.cat-label{background:var(--cream);padding:14px 18px;font-size:.88rem;font-weight:600;border-right:2px solid var(--border);display:flex;align-items:center}
+.category-row:focus-within{border-color:var(--ink)}
+.cat-label{background:var(--cream);padding:14px 18px;font-size:.88rem;font-weight:600;border-right:2px solid var(--border);display:flex;align-items:center;color:var(--ink)}
 .cat-input{border:none!important;border-radius:0!important;background:var(--light)!important;padding:14px 18px!important;box-shadow:none!important;font-size:1rem}
 .cat-input:focus{box-shadow:none!important}
+
 #review-screen .review-container{max-width:900px;width:100%;padding:32px 20px;display:flex;flex-direction:column;gap:20px}
 .review-category{background:var(--light);border:2px solid var(--border);border-radius:var(--radius);overflow:hidden}
 .review-cat-header{background:var(--ink);color:var(--light);padding:12px 20px;font-weight:700;font-size:.95rem}
@@ -762,9 +718,10 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(23
 .point-toggle{display:flex;gap:6px;flex-shrink:0;margin-left:8px}
 .pt-btn{width:40px;height:40px;border:2px solid var(--border);border-radius:8px;font-weight:700;font-size:.9rem;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;background:var(--paper)}
 .pt-btn.active-1{background:var(--green);border-color:var(--green);color:var(--light)}
-.pt-btn.active-0{background:var(--accent);border-color:var(--accent);color:var(--light)}
+.pt-btn.active-0{background:#c0392b;border-color:#c0392b;color:var(--light)}
 .pt-btn:hover{border-color:var(--ink)}
 .review-sticky-bar{position:sticky;bottom:0;background:var(--paper);border-top:2px solid var(--border);padding:16px 20px;display:flex;justify-content:flex-end;align-items:center;gap:12px;width:100%;z-index:50;margin-top:8px}
+
 #results-screen .results-container{max-width:700px;width:100%;padding:40px 20px;display:flex;flex-direction:column;gap:24px}
 .podium{display:flex;align-items:flex-end;justify-content:center;gap:12px}
 .podium-item{display:flex;flex-direction:column;align-items:center;gap:8px;flex:1;max-width:160px}
@@ -772,29 +729,35 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(23
 .podium-bar.p1{height:120px;background:var(--gold);font-size:2.5rem}
 .podium-bar.p2{height:90px;background:#b0bec5;font-size:2rem}
 .podium-bar.p3{height:70px;background:#a1887f;font-size:1.6rem}
-.podium-name{font-weight:700;font-size:.9rem;text-align:center}
+.podium-name{font-weight:700;font-size:.9rem;text-align:center;color:var(--ink)}
 .podium-score{font-size:.8rem;color:var(--muted)}
 .ranking{display:flex;flex-direction:column;gap:8px}
 .rank-item{display:flex;align-items:center;gap:14px;padding:14px 20px;background:var(--light);border:2px solid var(--border);border-radius:12px}
 .rank-pos{font-family:var(--font-display);font-size:1.4rem;font-weight:900;min-width:32px;color:var(--muted)}
 .rank-pos.top{color:var(--gold)}
 .rank-avatar{width:36px;height:36px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--light);font-size:.9rem}
-.rank-name{font-weight:600;font-size:.95rem;flex:1}
-.rank-score{font-family:var(--font-display);font-size:1.5rem;font-weight:900}
-.stopped-overlay{position:fixed;inset:0;z-index:150;background:rgba(230,57,70,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--light);opacity:0;pointer-events:none;transition:opacity .3s}
+.rank-name{font-weight:600;font-size:.95rem;flex:1;color:var(--ink)}
+.rank-score{font-family:var(--font-display);font-size:1.5rem;font-weight:900;color:var(--ink)}
+
+.stopped-overlay{position:fixed;inset:0;z-index:150;background:rgba(138,58,41,.93);display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--light);opacity:0;pointer-events:none;transition:opacity .3s}
 .stopped-overlay.show{opacity:1;pointer-events:all}
 .stopped-overlay h1{font-family:var(--font-display);font-size:5rem;font-weight:900}
 .stopped-overlay p{font-size:1.2rem;margin-top:8px;opacity:.85}
+
 .letter-bounce{display:inline-block;animation:bounceIn .5s cubic-bezier(.36,.07,.19,.97)}
 @keyframes bounceIn{0%{transform:scale(.3);opacity:0}60%{transform:scale(1.15)}80%{transform:scale(.95)}100%{transform:scale(1);opacity:1}}
+
 .progress-bar{height:4px;background:var(--cream);border-radius:999px;overflow:hidden}
-.progress-fill{height:100%;background:var(--accent);border-radius:999px;transition:width .1s linear}
+.progress-fill{height:100%;background:var(--ink);border-radius:999px;transition:width .1s linear}
+
 .toast{position:fixed;bottom:32px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--light);padding:12px 24px;border-radius:999px;font-size:.9rem;font-weight:500;z-index:300;opacity:0;transition:all .3s;pointer-events:none}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
 .text-muted{color:var(--muted);font-size:.85rem}
 .text-center{text-align:center}
 .mt-8{margin-top:8px}
 .flex-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+
 ::-webkit-scrollbar{width:6px}
 ::-webkit-scrollbar-track{background:var(--cream)}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:999px}
@@ -804,9 +767,23 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(23
 <div class="bg-dots"></div>
 <div class="toast" id="toast"></div>
 
+<!-- Logo SVG inline réutilisable -->
+<template id="logo-tpl">
+  <svg class="logo-svg" viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg">
+    <rect x="3" y="3" width="38" height="38" rx="8" fill="#EBD3A9" transform="rotate(-6 22 22)"/>
+    <rect x="3" y="3" width="38" height="38" rx="8" fill="#C9986A" transform="rotate(-2 22 22)"/>
+    <rect x="3" y="3" width="38" height="38" rx="8" fill="#8A3A29" transform="rotate(2 22 22)"/>
+    <text x="22" y="32" text-anchor="middle" font-family="Georgia,serif" font-size="24" font-weight="900" fill="#EBD3A9">B</text>
+  </svg>
+</template>
+
 <!-- SETUP -->
 <div class="screen" id="setup-screen">
-  <div class="site-header"><div class="logo">Petit <span>Bac</span></div><div class="header-sub">Configuration</div></div>
+  <div class="site-header">
+    <div id="logo-setup"></div>
+    <div class="logo-text">Petit Bac</div>
+    <div class="header-sub">Configuration</div>
+  </div>
   <div class="setup-container">
     <div class="card">
       <div class="section-title"><span class="dot"></span>Joueurs & Manches</div>
@@ -847,7 +824,11 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(23
 
 <!-- LOBBY -->
 <div class="screen" id="lobby-screen">
-  <div class="site-header"><div class="logo">Petit <span>Bac</span></div><div class="header-sub">Lobby</div></div>
+  <div class="site-header">
+    <div id="logo-lobby"></div>
+    <div class="logo-text">Petit Bac</div>
+    <div class="header-sub">Lobby</div>
+  </div>
   <div class="lobby-container">
     <div class="card">
       <div class="section-title"><span class="dot"></span>Votre pseudo</div>
@@ -869,7 +850,7 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(23
       <div class="player-list" id="player-list"></div>
     </div>
     <div class="flex-row" style="justify-content:space-between">
-      <button class="btn btn-secondary" onclick="cancelGame()" style="color:var(--accent);border-color:var(--accent)">✕ Annuler la partie</button>
+      <button class="btn btn-secondary" onclick="cancelGame()" style="color:#c0392b;border-color:#c0392b">✕ Annuler la partie</button>
       <button class="btn btn-primary btn-lg" onclick="startGame()">Lancer la partie ▶</button>
     </div>
   </div>
@@ -877,7 +858,7 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(23
 
 <!-- CANCELLED -->
 <div class="screen" id="cancelled-screen">
-  <div class="site-header"><div class="logo">Petit <span>Bac</span></div></div>
+  <div class="site-header"><div id="logo-cancelled"></div><div class="logo-text">Petit Bac</div></div>
   <div style="max-width:460px;width:100%;padding:60px 20px;text-align:center;display:flex;flex-direction:column;gap:20px;align-items:center">
     <div style="font-size:3rem">😕</div>
     <div class="section-title" style="justify-content:center">Partie annulée</div>
@@ -887,7 +868,7 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(23
 
 <!-- KICKED -->
 <div class="screen" id="kicked-screen">
-  <div class="site-header"><div class="logo">Petit <span>Bac</span></div></div>
+  <div class="site-header"><div id="logo-kicked"></div><div class="logo-text">Petit Bac</div></div>
   <div style="max-width:460px;width:100%;padding:60px 20px;text-align:center;display:flex;flex-direction:column;gap:20px;align-items:center">
     <div style="font-size:3rem">🚫</div>
     <div class="section-title" style="justify-content:center">Vous avez été expulsé</div>
@@ -897,9 +878,9 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(23
 
 <!-- JOIN -->
 <div class="screen" id="join-screen">
-  <div class="site-header"><div class="logo">Petit <span>Bac</span></div></div>
+  <div class="site-header"><div id="logo-join"></div><div class="logo-text">Petit Bac</div></div>
   <div class="join-container">
-    <div class="join-hero">Rejoindre<br>la <span>partie</span></div>
+    <div class="join-hero">Rejoindre<br>la partie</div>
     <div class="card">
       <div class="form-group"><label>Choisissez votre pseudo</label><input type="text" id="join-pseudo" placeholder="Ex : Camille..."></div>
       <button class="btn btn-accent btn-lg" style="width:100%" onclick="joinGame()">Rejoindre →</button>
@@ -910,7 +891,7 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(23
 
 <!-- WAIT -->
 <div class="screen" id="wait-screen">
-  <div class="site-header"><div class="logo">Petit <span>Bac</span></div></div>
+  <div class="site-header"><div id="logo-wait"></div><div class="logo-text">Petit Bac</div></div>
   <div style="max-width:460px;width:100%;padding:60px 20px;text-align:center;display:flex;flex-direction:column;gap:20px;align-items:center">
     <div style="font-size:3rem">⏳</div>
     <div class="section-title" style="justify-content:center">En attente du lancement...</div>
@@ -939,7 +920,11 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(23
 
 <!-- REVIEW -->
 <div class="screen" id="review-screen">
-  <div class="site-header"><div class="logo">Petit <span>Bac</span></div><div class="header-sub" id="review-header-label">Récap</div></div>
+  <div class="site-header">
+    <div id="logo-review"></div>
+    <div class="logo-text">Petit Bac</div>
+    <div class="header-sub" id="review-header-label">Récap</div>
+  </div>
   <div class="review-container">
     <div class="card" style="text-align:center;padding:20px 24px">
       <div style="font-size:2rem;margin-bottom:6px">📋</div>
@@ -957,7 +942,11 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(23
 
 <!-- RESULTS -->
 <div class="screen" id="results-screen">
-  <div class="site-header"><div class="logo">Petit <span>Bac</span></div><div class="header-sub">Résultats 🏆</div></div>
+  <div class="site-header">
+    <div id="logo-results"></div>
+    <div class="logo-text">Petit Bac</div>
+    <div class="header-sub">Résultats 🏆</div>
+  </div>
   <div class="results-container">
     <div id="podium-area"></div>
     <div class="card"><div class="section-title"><span class="dot"></span>Classement</div><div class="ranking" id="ranking-list"></div></div>
@@ -973,5 +962,15 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(23
   <h1>STOP !</h1>
   <p id="stop-message">La manche est terminée</p>
 </div>
+
+<script>
+// Injecter le logo SVG dans tous les headers
+document.addEventListener('DOMContentLoaded', () => {
+  const tpl = document.getElementById('logo-tpl').content;
+  document.querySelectorAll('[id^="logo-"]').forEach(el => {
+    el.appendChild(tpl.cloneNode(true));
+  });
+});
+</script>
 </body>
 </html>
