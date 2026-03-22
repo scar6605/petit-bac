@@ -1,4 +1,4 @@
-const CACHE = 'petitbac-v1';
+const CACHE = 'petitbac-v2';
 const ASSETS = [
   '/petit-bac/',
   '/petit-bac/index.html',
@@ -6,19 +6,19 @@ const ASSETS = [
   '/petit-bac/icon-192.svg',
   '/petit-bac/icon-512.svg'
 ];
- 
+
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
   self.skipWaiting();
 });
- 
+
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(keys =>
     Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
   ));
   self.clients.claim();
 });
- 
+
 self.addEventListener('fetch', e => {
   if(e.request.url.includes('firebase') || e.request.url.includes('googleapis') || e.request.url.includes('gstatic')) {
     return;
@@ -27,4 +27,3 @@ self.addEventListener('fetch', e => {
     caches.match(e.request).then(cached => cached || fetch(e.request))
   );
 });
- 
