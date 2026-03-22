@@ -304,7 +304,7 @@ window.playerStop = async () => {
   const data=await dbGet(G.gameId);
   await saveMyAnswers(data.currentRound);
   const mode=G.config.mode;
-  if(mode==='stop-common'||mode==='first-stop'){
+  if(mode==='first-stop'){
     clearInterval(G.timerIv);
     if(G.isHost) await endRound(data.currentRound,'STOP !');
     else {
@@ -572,7 +572,10 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(23
 <div class="screen" id="setup-screen">
   <div class="site-header"><div class="logo">Petit <span>Bac</span></div><div class="header-sub">Configuration</div></div>
   <div class="setup-container">
-    
+    <div class="warn-banner">
+      <span style="font-size:1.4rem;flex-shrink:0">⚙️</span>
+      <div><strong>Étape requise : configurez Firebase</strong>Ouvrez ce fichier HTML dans un éditeur, trouvez le bloc <code>firebaseConfig</code> en haut et remplacez les valeurs par celles de votre projet Firebase. Consultez le guide fourni ci-joint.</div>
+    </div>
     <div class="card">
       <div class="section-title"><span class="dot"></span>Joueurs & Manches</div>
       <div class="form-row">
@@ -599,7 +602,6 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(23
       <div class="radio-group" id="mode-group">
         <div class="radio-option selected" data-mode="timer" onclick="selectMode(this)">⏱ Timer</div>
         <div class="radio-option" data-mode="stop-individual" onclick="selectMode(this)">🙋 Stop individuel</div>
-        <div class="radio-option" data-mode="stop-common" onclick="selectMode(this)">🛑 Stop commun</div>
         <div class="radio-option" data-mode="first-stop" onclick="selectMode(this)">⚡ 1er terminé</div>
       </div>
       <div id="timer-options" style="margin-top:16px">
